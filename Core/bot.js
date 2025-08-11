@@ -500,68 +500,7 @@ class HyperWaBot {
         }
     }
 
-    async processIncomingMessage(msg, upsert) {
-        const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
-        
-        if (!text) return;
 
-        // Handle special commands
-        if (text === "requestPlaceholder" && !upsert.requestId) {
-            const messageId = await this.sock.requestPlaceholderResend(msg.key);
-            logger.info('🔄 Requested placeholder resync, ID:', messageId);
-            return;
-        }
-
-        if (text === "onDemandHistSync") {
-            const messageId = await this.sock.fetchMessageHistory(50, msg.key, msg.messageTimestamp);
-            logger.info('📥 Requested on-demand sync, ID:', messageId);
-            return;
-        }
-
-        // Enhanced auto-reply with user stats
-        if (!msg.key.fromMe && this.autoReply && !isJidNewsletter(msg.key?.remoteJid)) {
-            const userStats = this.getUserStats(msg.key.participant || msg.key.remoteJid);
-            const contactInfo = this.getContactInfo(msg.key.participant || msg.key.remoteJid);
-            
-            logger.info(`🤖 Auto-replying to: ${contactInfo?.name || msg.key.remoteJid} (${userStats.messageCount} messages)`);
-            
-            if (this.autoReadMessages) {
-                await this.sock.readMessages([msg.key]);
-            }
-            
-            let replyText = config.get('messages.autoReplyText', 'Hello there! This is an automated response.');
-            
-            // Personalize reply based on user history
-            if (userStats.messageCount > 10) {
-                replyText += `\n\nGood to hear from you again! 👋`;
-            } else if (userStats.messageCount === 0) {
-                replyText += `\n\nWelcome! This seems to be your first message. 🎉`;
-            }
-            
-            await this.sendMessageWithTyping({ text: replyText }, msg.key.remoteJid);
-        }
-    }
-
-    async sendMessageWithTyping(content, jid) {
-        if (!this.sock || !this.enableTypingIndicators) {
-            return await this.sock?.sendMessage(jid, content);
-        }
-
-        try {
-            await this.sock.presenceSubscribe(jid);
-            await delay(500);
-
-            await this.sock.sendPresenceUpdate('composing', jid);
-            await delay(2000);
-
-            await this.sock.sendPresenceUpdate('paused', jid);
-
-            return await this.sock.sendMessage(jid, content);
-        } catch (error) {
-            logger.warn('⚠️ Failed to send message with typing:', error.message);
-            return await this.sock.sendMessage(jid, content);
-        }
-    }
 
     async onConnectionOpen() {
         logger.info(`✅ Connected to WhatsApp! User: ${this.sock.user?.id || 'Unknown'}`);
@@ -605,13 +544,10 @@ class HyperWaBot {
                               `• 🔐 Auth Method: ${authMethod}\n` +
                               `• 🤖 Telegram Bridge: ${config.get('telegram.enabled') ? '✅' : '❌'}\n` +
                               `• 🔧 Custom Modules: ${config.get('features.customModules') ? '✅' : '❌'}\n` +
-                              `• ⌨️ Typing Indicators: ${this.enableTypingIndicators ? '✅' : '❌'}\n` +
-                              `• 📖 Auto Read: ${this.autoReadMessages ? '✅' : '❌'}\n` +
-                              `• 🤖 Auto Reply: ${this.autoReply ? '✅' : '❌'}\n` +
                               `Type *${config.get('bot.prefix')}help* for available commands!`;
 
         try {
-            await this.sendMessageWithTyping({ text: startupMessage }, owner);
+            await this.sendMessage(owner, { text: startupMessage });
         } catch {}
 
         if (this.telegramBridge) {
@@ -629,37 +565,14 @@ class HyperWaBot {
         }
         return this.sock;
     }
-
     async sendMessage(jid, content) {
         if (!this.sock) {
             throw new Error('WhatsApp socket not initialized');
         }
         
-        if (this.enableTypingIndicators) {
-            return await this.sendMessageWithTyping(content, jid);
-        }
-        
         return await this.sock.sendMessage(jid, content);
     }
 
-    // Configuration methods for new features
-    setAutoReply(enabled) {
-        this.autoReply = enabled;
-        config.set('features.autoReply', enabled);
-        logger.info(`🤖 Auto-reply ${enabled ? 'enabled' : 'disabled'}`);
-    }
-
-    setTypingIndicators(enabled) {
-        this.enableTypingIndicators = enabled;
-        config.set('features.typingIndicators', enabled);
-        logger.info(`⌨️ Typing indicators ${enabled ? 'enabled' : 'disabled'}`);
-    }
-
-    setAutoReadMessages(enabled) {
-        this.autoReadMessages = enabled;
-        config.set('features.autoReadMessages', enabled);
-        logger.info(`📖 Auto-read messages ${enabled ? 'enabled' : 'disabled'}`);
-    }
 
     async shutdown() {
         logger.info('🛑 Shutting down HyperWa Userbot...');
