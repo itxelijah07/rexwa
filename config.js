@@ -11,7 +11,8 @@ class Config {
             },
 
             auth: {
-                useMongoAuth: true // Set to false for file-based auth
+                useMongoAuth: true, // Set to false for file-based auth
+                clearAuthOnStart: false
             },
 
             admins: [
@@ -24,6 +25,10 @@ class Config {
                 mode: 'public',                   // 'public' or 'private'
                 customModules: true,              // Enable custom modules
                 rateLimiting: true,              // Disable rate limiting for better performance
+                autoReply: false,                 // Auto reply to messages
+                typingIndicators: true,           // Show typing indicators
+                autoReadMessages: true,           // Auto read messages
+                autoViewStatus: false,            // Auto view status updates
                 telegramBridge: true,             // Sync with Telegram
                 respondToUnknownCommands: false, // Respond to unknown commands
                 sendPermissionError: false        // Send error for disallowed commands
@@ -45,6 +50,7 @@ class Config {
                     mediaSync: true,
                     profilePicSync: false,
                     callLogs: true,
+                    readReceipts: true,               // Send read receipts after sync
                     statusSync: true,
                     biDirectional: true,
                     welcomeMessage: false,         // Message on topic creation
@@ -53,6 +59,13 @@ class Config {
                     readReceipts: false,
                     animatedStickers: true
                 }
+            },
+            
+            // Assistant module configuration
+            assistant: {
+                enabled: false,                   // Enable AI assistant
+                learningMode: true,              // Allow learning new patterns
+                suggestionThreshold: 0.6         // Confidence threshold for suggestions
             },
 
             help: {
@@ -73,11 +86,32 @@ class Config {
                 saveToFile: true,     // Write logs to file
                 maxFileSize: '10MB',  // Max size per log file
                 maxFiles: 5           // Max number of rotated files
+            },
+            
+            // Store configuration for enhanced features
+            store: {
+                filePath: './whatsapp-store.json',
+                autoSaveInterval: 30000           // Save every 30 seconds
+            },
+            
+            // Security settings
+            security: {
+                blockedUsers: [],                 // Array of blocked user IDs
+                maxFileSize: '10MB',  // Max size per log file
+                maxFiles: 5           // Max number of rotated files
             }
         };
 
         this.load();
     }
+    
+    // Messages configuration
+    messages: {
+        autoReplyText: 'Hello! This is an automated response. I\'ll get back to you soon.',
+        welcomeText: 'Welcome to the group!',
+        goodbyeText: 'Goodbye! Thanks for being part of our community.',
+        errorText: 'Something went wrong. Please try again later.'
+    },
 
     load() {
         this.config = { ...this.defaultConfig };
