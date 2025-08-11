@@ -103,13 +103,8 @@ class MessageHandler {
     async handleStatusMessage(msg) {
         // Let status viewer module handle this
         await this.executeMessageHooks('pre_process', msg, this.extractText(msg));
-
-        // Also sync status messages to Telegram
-        if (this.bot.telegramBridge) {
-            const text = this.extractText(msg);
-            await this.bot.telegramBridge.syncMessage(msg, text);
-        }
     }
+
     // New method to check if message has media
     hasMedia(msg) {
         return !!(
