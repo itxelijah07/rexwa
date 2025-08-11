@@ -1,4 +1,3 @@
-
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, getAggregateVotesInPollMessage, isJidNewsletter, delay, proto } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs-extra');
@@ -29,7 +28,7 @@ class HyperWaBot {
         this.store = makeInMemoryStore({
             logger: logger.child({ module: 'store' }),
             filePath: config.get('store.filePath', './whatsapp-store.json'),
-            autoSaveInterval: config.get('store.autoSaveInterval', 30000) // Save every 30 seconds
+            autoSaveInterval: config.get('store.autoSaveInterval', 30000)
         });
 
         // Load existing store data on startup
@@ -41,9 +40,6 @@ class HyperWaBot {
             maxKeys: 500
         });
         this.onDemandMap = new Map();
-        this.autoReply = config.get('features.autoReply', false);
-        this.enableTypingIndicators = config.get('features.typingIndicators', true);
-        this.autoReadMessages = config.get('features.autoReadMessages', true);
         
         // Simple memory cleanup
         setInterval(() => {
@@ -205,6 +201,7 @@ class HyperWaBot {
             setTimeout(() => this.startWhatsApp(), 5000);
         }
     }
+
     // Enhanced getMessage with store lookup
     async getMessage(key) {
         try {
@@ -488,7 +485,8 @@ class HyperWaBot {
         if (upsert.type === 'notify') {
             for (const msg of upsert.messages) {
                 try {
-                    await this.processIncomingMessage(msg, upsert);
+                    // Let modules handle the message processing
+                    await this.messageHandler.processMessage(msg);
                 } catch (error) {
                     logger.warn('⚠️ Message processing error:', error.message);
                 }
@@ -499,69 +497,6 @@ class HyperWaBot {
             await this.messageHandler.handleMessages({ messages: upsert.messages, type: upsert.type });
         } catch (error) {
             logger.warn('⚠️ Original message handler error:', error.message);
-        }
-    }
-
-    async processIncomingMessage(msg, upsert) {
-        const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
-        
-        if (!text) return;
-
-        // Handle special commands
-        if (text === "requestPlaceholder" && !upsert.requestId) {
-            const messageId = await this.sock.requestPlaceholderResend(msg.key);
-            logger.info('🔄 Requested placeholder resync, ID:', messageId);
-            return;
-        }
-
-        if (text === "onDemandHistSync") {
-            const messageId = await this.sock.fetchMessageHistory(50, msg.key, msg.messageTimestamp);
-            logger.info('📥 Requested on-demand sync, ID:', messageId);
-            return;
-        }
-
-        // Enhanced auto-reply with user stats
-        if (!msg.key.fromMe && this.autoReply && !isJidNewsletter(msg.key?.remoteJid)) {
-            const userStats = this.getUserStats(msg.key.participant || msg.key.remoteJid);
-            const contactInfo = this.getContactInfo(msg.key.participant || msg.key.remoteJid);
-            
-            logger.info(`🤖 Auto-replying to: ${contactInfo?.name || msg.key.remoteJid} (${userStats.messageCount} messages)`);
-            
-            if (this.autoReadMessages) {
-                await this.sock.readMessages([msg.key]);
-            }
-            
-            let replyText = config.get('messages.autoReplyText', 'Hello there! This is an automated response.');
-            
-            // Personalize reply based on user history
-            if (userStats.messageCount > 10) {
-                replyText += `\n\nGood to hear from you again! 👋`;
-            } else if (userStats.messageCount === 0) {
-                replyText += `\n\nWelcome! This seems to be your first message. 🎉`;
-            }
-            
-            await this.sendMessageWithTyping({ text: replyText }, msg.key.remoteJid);
-        }
-    }
-
-    async sendMessageWithTyping(content, jid) {
-        if (!this.sock || !this.enableTypingIndicators) {
-            return await this.sock?.sendMessage(jid, content);
-        }
-
-        try {
-            await this.sock.presenceSubscribe(jid);
-            await delay(500);
-
-            await this.sock.sendPresenceUpdate('composing', jid);
-            await delay(2000);
-
-            await this.sock.sendPresenceUpdate('paused', jid);
-
-            return await this.sock.sendMessage(jid, content);
-        } catch (error) {
-            logger.warn('⚠️ Failed to send message with typing:', error.message);
-            return await this.sock.sendMessage(jid, content);
         }
     }
 
@@ -607,13 +542,10 @@ class HyperWaBot {
                               `• 🔐 Auth Method: ${authMethod}\n` +
                               `• 🤖 Telegram Bridge: ${config.get('telegram.enabled') ? '✅' : '❌'}\n` +
                               `• 🔧 Custom Modules: ${config.get('features.customModules') ? '✅' : '❌'}\n` +
-                              `• ⌨️ Typing Indicators: ${this.enableTypingIndicators ? '✅' : '❌'}\n` +
-                              `• 📖 Auto Read: ${this.autoReadMessages ? '✅' : '❌'}\n` +
-                              `• 🤖 Auto Reply: ${this.autoReply ? '✅' : '❌'}\n` +
                               `Type *${config.get('bot.prefix')}help* for available commands!`;
 
         try {
-            await this.sendMessageWithTyping({ text: startupMessage }, owner);
+            await this.sendMessage(owner, { text: startupMessage });
         } catch {}
 
         if (this.telegramBridge) {
@@ -637,30 +569,7 @@ class HyperWaBot {
             throw new Error('WhatsApp socket not initialized');
         }
         
-        if (this.enableTypingIndicators) {
-            return await this.sendMessageWithTyping(content, jid);
-        }
-        
         return await this.sock.sendMessage(jid, content);
-    }
-
-    // Configuration methods for new features
-    setAutoReply(enabled) {
-        this.autoReply = enabled;
-        config.set('features.autoReply', enabled);
-        logger.info(`🤖 Auto-reply ${enabled ? 'enabled' : 'disabled'}`);
-    }
-
-    setTypingIndicators(enabled) {
-        this.enableTypingIndicators = enabled;
-        config.set('features.typingIndicators', enabled);
-        logger.info(`⌨️ Typing indicators ${enabled ? 'enabled' : 'disabled'}`);
-    }
-
-    setAutoReadMessages(enabled) {
-        this.autoReadMessages = enabled;
-        config.set('features.autoReadMessages', enabled);
-        logger.info(`📖 Auto-read messages ${enabled ? 'enabled' : 'disabled'}`);
     }
 
     async shutdown() {
