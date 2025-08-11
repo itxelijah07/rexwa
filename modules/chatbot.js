@@ -520,52 +520,66 @@ Keep responses concise but informative. Be engaging and personable.`;
         // Check if chat is enabled for this user/group
         if (!this.shouldRespondToChat(context)) return;
 
+        let typingStarted = false;
+
         try {
-            // Get presence module for typing indicators
-            const presenceModule = bot.moduleLoader.getModule('presence');
-            
-            // Start typing if presence module is available
-            if (presenceModule) {
-                await presenceModule.startTyping(context.sender, bot);
+            // Start typing indicator and presence
+            if (bot.sock) {
+                try {
+                    await bot.sock.presenceSubscribe(context.sender);
+                    await bot.sock.sendPresenceUpdate('composing', context.sender);
+                    typingStarted = true;
+                } catch (error) {
+                    logger.debug('Failed to set typing indicator:', error.message);
+                }
             }
 
+            // Generate response
             const response = await this.generateChatResponse(msg, context, bot);
             
             if (response) {
-                // Stop typing and update presence
-                if (presenceModule) {
-                    await presenceModule.stopTyping(context.sender, bot);
-                    await presenceModule.setPresence('available', context.sender, bot);
+                // Stop typing before sending message
+                if (bot.sock && typingStarted) {
+                    try {
+                        await bot.sock.sendPresenceUpdate('paused', context.sender);
+                    } catch (error) {
+                        logger.debug('Failed to stop typing:', error.message);
+                    }
                 }
                 
                 // Send response
                 const result = await bot.sendMessage(context.sender, { text: response });
                 
-                // Send read receipt after successful response if presence module handles it
-                if (result && presenceModule && presenceModule.autoReadMessages) {
+                // Handle read receipts after successful response
+                if (result && bot.sock) {
                     try {
                         await bot.sock.readMessages([msg.key]);
                     } catch (error) {
                         logger.debug('Read receipt failed (non-critical):', error.message);
                     }
-                }
-            } else {
-                // Stop typing even if no response
-                if (presenceModule) {
-                    await presenceModule.stopTyping(context.sender, bot);
+                    
+                    // Set presence to available after response
+                    try {
+                        await bot.sock.sendPresenceUpdate('available', context.sender);
+                    } catch (error) {
+                        logger.debug('Failed to set available presence:', error.message);
+                    }
                 }
             }
 
         } catch (error) {
             logger.error('ChatBot response error:', error);
-            // Stop typing on error
-            if (presenceModule) {
-                await presenceModule.stopTyping(context.sender, bot);
-                await presenceModule.setPresence('available', context.sender, bot);
+            
+            // Always stop typing on error
+            if (bot.sock && typingStarted) {
+                try {
+                    await bot.sock.sendPresenceUpdate('paused', context.sender);
+                } catch (err) {
+                    logger.debug('Failed to stop typing on error:', err.message);
+                }
             }
         }
     }
-
     shouldRespondToChat(context) {
         const userId = context.participant.split('@')[0];
 
