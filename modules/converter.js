@@ -1,4 +1,3 @@
-
 const fs = require('fs-extra');
 const path = require('path');
 const { exec } = require('child_process');
@@ -27,6 +26,52 @@ class ConverterModule {
         this.ratesLastUpdated = 0;
         this.ratesCacheTime = 3600000; // 1 hour
 
+        // Unit conversion definitions
+        this.units = {
+            length: {
+                mm: 0.001,
+                cm: 0.01,
+                m: 1,
+                km: 1000,
+                in: 0.0254,
+                ft: 0.3048,
+                yd: 0.9144,
+                mi: 1609.34
+            },
+            weight: {
+                mg: 0.000001,
+                g: 0.001,
+                kg: 1,
+                oz: 0.0283495,
+                lb: 0.453592,
+                ton: 1000
+            },
+            temperature: { // Special handling
+                c: 'c',
+                f: 'f',
+                k: 'k'
+            },
+            area: {
+                mm2: 0.000001,
+                cm2: 0.0001,
+                m2: 1,
+                km2: 1000000,
+                in2: 0.00064516,
+                ft2: 0.092903,
+                yd2: 0.836127,
+                acre: 4046.86
+            },
+            volume: {
+                ml: 0.001,
+                l: 1,
+                gal: 3.78541,
+                qt: 0.946353,
+                pt: 0.473176,
+                cup: 0.236588,
+                'fl_oz': 0.0295735
+            }
+        };
+
         this.commands = [
             // Media Converters
             {
@@ -34,6 +79,7 @@ class ConverterModule {
                 description: 'Convert image/video to sticker',
                 usage: '.sticker (reply to media)',
                 permissions: 'public',
+                autoWrap: false,
                 execute: this.createSticker.bind(this)
             },
             {
@@ -41,6 +87,7 @@ class ConverterModule {
                 description: 'Convert sticker to image',
                 usage: '.toimg (reply to sticker)',
                 permissions: 'public',
+                autoWrap: false,
                 execute: this.stickerToImage.bind(this)
             },
             {
@@ -48,6 +95,7 @@ class ConverterModule {
                 description: 'Convert animated sticker to GIF',
                 usage: '.togif (reply to animated sticker)',
                 permissions: 'public',
+                autoWrap: false,
                 execute: this.stickerToGif.bind(this)
             },
             {
@@ -55,6 +103,7 @@ class ConverterModule {
                 description: 'Create text sticker',
                 usage: '.textsticker <text>',
                 permissions: 'public',
+                autoWrap: false,
                 execute: this.textToSticker.bind(this)
             },
             {
@@ -62,6 +111,7 @@ class ConverterModule {
                 description: 'Convert audio to WhatsApp voice note',
                 usage: '.tovn (reply to audio)',
                 permissions: 'public',
+                autoWrap: false,
                 execute: this.audioToVoiceNote.bind(this)
             },
             {
@@ -69,6 +119,7 @@ class ConverterModule {
                 description: 'Convert audio/video to MP3',
                 usage: '.tomp3 (reply to media)',
                 permissions: 'public',
+                autoWrap: false,
                 execute: this.toMp3.bind(this)
             },
             {
@@ -76,6 +127,7 @@ class ConverterModule {
                 description: 'Convert video to MP4',
                 usage: '.tomp4 (reply to video)',
                 permissions: 'public',
+                autoWrap: false,
                 execute: this.toMp4.bind(this)
             },
             {
@@ -83,6 +135,7 @@ class ConverterModule {
                 description: 'Convert video to GIF',
                 usage: '.togif2 (reply to video)',
                 permissions: 'public',
+                autoWrap: false,
                 execute: this.videoToGif.bind(this)
             },
             {
@@ -90,6 +143,7 @@ class ConverterModule {
                 description: 'Enhance video quality',
                 usage: '.enhance (reply to video)',
                 permissions: 'public',
+                autoWrap: false,
                 execute: this.enhanceVideo.bind(this)
             },
             {
@@ -97,6 +151,7 @@ class ConverterModule {
                 description: 'Remove noise from audio',
                 usage: '.denoise (reply to audio)',
                 permissions: 'public',
+                autoWrap: false,
                 execute: this.denoiseAudio.bind(this)
             },
             {
@@ -104,6 +159,7 @@ class ConverterModule {
                 description: 'Remove audio from video',
                 usage: '.mutevideo (reply to video)',
                 permissions: 'public',
+                autoWrap: false,
                 execute: this.muteVideo.bind(this)
             },
             {
@@ -111,6 +167,7 @@ class ConverterModule {
                 description: 'Compress video file',
                 usage: '.compress (reply to video)',
                 permissions: 'public',
+                autoWrap: false,
                 execute: this.compressVideo.bind(this)
             },
             
@@ -121,44 +178,18 @@ class ConverterModule {
                 usage: '.currency <amount> <from> <to>',
                 aliases: ['cur', 'exchange'],
                 permissions: 'public',
+                autoWrap: false,
                 execute: this.convertCurrency.bind(this)
             },
             
-            // Unit Converters
+            // Unified Unit Converter
             {
-                name: 'length',
-                description: 'Convert length units',
-                usage: '.length <value> <from> <to>',
+                name: 'unit',
+                description: 'Convert units (length, weight, temp, area, volume)',
+                usage: '.unit <value> <from_unit> to <to_unit>',
                 permissions: 'public',
-                execute: this.convertLength.bind(this)
-            },
-            {
-                name: 'weight',
-                description: 'Convert weight units',
-                usage: '.weight <value> <from> <to>',
-                permissions: 'public',
-                execute: this.convertWeight.bind(this)
-            },
-            {
-                name: 'temp',
-                description: 'Convert temperature',
-                usage: '.temp <value> <from> <to>',
-                permissions: 'public',
-                execute: this.convertTemperature.bind(this)
-            },
-            {
-                name: 'area',
-                description: 'Convert area units',
-                usage: '.area <value> <from> <to>',
-                permissions: 'public',
-                execute: this.convertArea.bind(this)
-            },
-            {
-                name: 'volume',
-                description: 'Convert volume units',
-                usage: '.volume <value> <from> <to>',
-                permissions: 'public',
-                execute: this.convertVolume.bind(this)
+                autoWrap: false,
+                execute: this.convertUnit.bind(this)
             }
         ];
     }
@@ -172,7 +203,7 @@ class ConverterModule {
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
         
         if (!quotedMsg?.imageMessage && !quotedMsg?.videoMessage) {
-            return '❌ Please reply to an image or video to create a sticker.';
+            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to an image or video to create a sticker.' });
         }
 
         try {
@@ -208,7 +239,7 @@ class ConverterModule {
             await fs.remove(outputFile);
 
         } catch (error) {
-            return `❌ Failed to create sticker: ${error.message}`;
+            await context.bot.sendMessage(context.sender, { text: `❌ Failed to create sticker: ${error.message}` });
         }
     }
 
@@ -216,7 +247,7 @@ class ConverterModule {
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
         
         if (!quotedMsg?.stickerMessage) {
-            return '❌ Please reply to a sticker to convert it to image.';
+            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to a sticker to convert it to image.' });
         }
 
         try {
@@ -245,7 +276,7 @@ class ConverterModule {
             await fs.remove(outputFile);
 
         } catch (error) {
-            return `❌ Failed to convert sticker: ${error.message}`;
+            await context.bot.sendMessage(context.sender, { text: `❌ Failed to convert sticker: ${error.message}` });
         }
     }
 
@@ -253,7 +284,7 @@ class ConverterModule {
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
         
         if (!quotedMsg?.stickerMessage) {
-            return '❌ Please reply to an animated sticker to convert it to GIF.';
+            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to an animated sticker to convert it to GIF.' });
         }
 
         try {
@@ -283,13 +314,13 @@ class ConverterModule {
             await fs.remove(outputFile);
 
         } catch (error) {
-            return `❌ Failed to convert sticker to GIF: ${error.message}`;
+            await context.bot.sendMessage(context.sender, { text: `❌ Failed to convert sticker to GIF: ${error.message}` });
         }
     }
 
     async textToSticker(msg, params, context) {
         if (params.length === 0) {
-            return '❌ Please provide text to create a sticker.\nUsage: .textsticker <text>';
+            return await context.bot.sendMessage(context.sender, { text: '❌ Please provide text to create a sticker.\nUsage: .textsticker <text>' });
         }
 
         const text = params.join(' ');
@@ -310,7 +341,7 @@ class ConverterModule {
             await fs.remove(outputFile);
 
         } catch (error) {
-            return `❌ Failed to create text sticker: ${error.message}`;
+            await context.bot.sendMessage(context.sender, { text: `❌ Failed to create text sticker: ${error.message}` });
         }
     }
 
@@ -318,7 +349,7 @@ class ConverterModule {
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
         
         if (!quotedMsg?.audioMessage && !quotedMsg?.videoMessage) {
-            return '❌ Please reply to an audio or video file to convert to voice note.';
+            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to an audio or video file to convert to voice note.' });
         }
 
         try {
@@ -351,7 +382,7 @@ class ConverterModule {
             await fs.remove(outputFile);
 
         } catch (error) {
-            return `❌ Failed to convert to voice note: ${error.message}`;
+            await context.bot.sendMessage(context.sender, { text: `❌ Failed to convert to voice note: ${error.message}` });
         }
     }
 
@@ -359,7 +390,7 @@ class ConverterModule {
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
         
         if (!quotedMsg?.audioMessage && !quotedMsg?.videoMessage) {
-            return '❌ Please reply to an audio or video file to convert to MP3.';
+            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to an audio or video file to convert to MP3.' });
         }
 
         try {
@@ -374,17 +405,16 @@ class ConverterModule {
             const buffer = Buffer.concat(chunks);
 
             const inputFile = path.join(this.tempDir, `input_${Date.now()}.${mediaType === 'audio' ? 'ogg' : 'mp4'}`);
-            const outputFile = path.join(this.tempDir, `audio_${Date.now()}.mp3`);
+            const outputFile = path.join(this.tempDir, `mp3_${Date.now()}.mp3`);
 
             await fs.writeFile(inputFile, buffer);
-            await execAsync(`ffmpeg -i "${inputFile}" -c:a libmp3lame -b:a 128k -vn "${outputFile}"`);
+            await execAsync(`ffmpeg -i "${inputFile}" -c:a libmp3lame -q:a 2 "${outputFile}"`);
 
             const mp3Buffer = await fs.readFile(outputFile);
 
             await context.bot.sendMessage(context.sender, {
                 audio: mp3Buffer,
-                mimetype: 'audio/mpeg',
-                caption: '🎵 Converted to MP3'
+                mimetype: 'audio/mpeg'
             });
 
             // Cleanup
@@ -392,7 +422,7 @@ class ConverterModule {
             await fs.remove(outputFile);
 
         } catch (error) {
-            return `❌ Failed to convert to MP3: ${error.message}`;
+            await context.bot.sendMessage(context.sender, { text: `❌ Failed to convert to MP3: ${error.message}` });
         }
     }
 
@@ -400,7 +430,7 @@ class ConverterModule {
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
         
         if (!quotedMsg?.videoMessage) {
-            return '❌ Please reply to a video file to convert to MP4.';
+            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to a video file to convert to MP4.' });
         }
 
         try {
@@ -411,17 +441,17 @@ class ConverterModule {
             }
             const buffer = Buffer.concat(chunks);
 
-            const inputFile = path.join(this.tempDir, `input_${Date.now()}.webm`);
-            const outputFile = path.join(this.tempDir, `video_${Date.now()}.mp4`);
+            const inputFile = path.join(this.tempDir, `input_${Date.now()}.mp4`);
+            const outputFile = path.join(this.tempDir, `mp4_${Date.now()}.mp4`);
 
             await fs.writeFile(inputFile, buffer);
-            await execAsync(`ffmpeg -i "${inputFile}" -c:v libx264 -c:a aac "${outputFile}"`);
+            await execAsync(`ffmpeg -i "${inputFile}" -c copy "${outputFile}"`);
 
             const mp4Buffer = await fs.readFile(outputFile);
 
             await context.bot.sendMessage(context.sender, {
                 video: mp4Buffer,
-                caption: '🎬 Converted to MP4'
+                caption: '🎥 Converted to MP4'
             });
 
             // Cleanup
@@ -429,7 +459,7 @@ class ConverterModule {
             await fs.remove(outputFile);
 
         } catch (error) {
-            return `❌ Failed to convert to MP4: ${error.message}`;
+            await context.bot.sendMessage(context.sender, { text: `❌ Failed to convert to MP4: ${error.message}` });
         }
     }
 
@@ -437,7 +467,7 @@ class ConverterModule {
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
         
         if (!quotedMsg?.videoMessage) {
-            return '❌ Please reply to a video file to convert to GIF.';
+            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to a video file to convert to GIF.' });
         }
 
         try {
@@ -452,7 +482,7 @@ class ConverterModule {
             const outputFile = path.join(this.tempDir, `gif_${Date.now()}.gif`);
 
             await fs.writeFile(inputFile, buffer);
-            await execAsync(`ffmpeg -i "${inputFile}" -t 10 -vf "fps=10,scale=320:-1:flags=lanczos" -f gif "${outputFile}"`);
+            await execAsync(`ffmpeg -i "${inputFile}" -vf "fps=10,scale=320:-1:flags=lanczos" -f gif "${outputFile}"`);
 
             const gifBuffer = await fs.readFile(outputFile);
 
@@ -467,7 +497,7 @@ class ConverterModule {
             await fs.remove(outputFile);
 
         } catch (error) {
-            return `❌ Failed to convert video to GIF: ${error.message}`;
+            await context.bot.sendMessage(context.sender, { text: `❌ Failed to convert video to GIF: ${error.message}` });
         }
     }
 
@@ -475,7 +505,7 @@ class ConverterModule {
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
         
         if (!quotedMsg?.videoMessage) {
-            return '❌ Please reply to a video file to enhance quality.';
+            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to a video file to enhance quality.' });
         }
 
         try {
@@ -506,7 +536,7 @@ class ConverterModule {
             await fs.remove(outputFile);
 
         } catch (error) {
-            return `❌ Failed to enhance video: ${error.message}`;
+            await context.bot.sendMessage(context.sender, { text: `❌ Failed to enhance video: ${error.message}` });
         }
     }
 
@@ -514,7 +544,7 @@ class ConverterModule {
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
         
         if (!quotedMsg?.audioMessage) {
-            return '❌ Please reply to an audio file to remove noise.';
+            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to an audio file to remove noise.' });
         }
 
         try {
@@ -546,7 +576,7 @@ class ConverterModule {
             await fs.remove(outputFile);
 
         } catch (error) {
-            return `❌ Failed to denoise audio: ${error.message}`;
+            await context.bot.sendMessage(context.sender, { text: `❌ Failed to denoise audio: ${error.message}` });
         }
     }
 
@@ -554,7 +584,7 @@ class ConverterModule {
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
         
         if (!quotedMsg?.videoMessage) {
-            return '❌ Please reply to a video file to mute.';
+            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to a video file to mute.' });
         }
 
         try {
@@ -583,7 +613,7 @@ class ConverterModule {
             await fs.remove(outputFile);
 
         } catch (error) {
-            return `❌ Failed to mute video: ${error.message}`;
+            await context.bot.sendMessage(context.sender, { text: `❌ Failed to mute video: ${error.message}` });
         }
     }
 
@@ -591,7 +621,7 @@ class ConverterModule {
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
         
         if (!quotedMsg?.videoMessage) {
-            return '❌ Please reply to a video file to compress.';
+            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to a video file to compress.' });
         }
 
         try {
@@ -625,14 +655,14 @@ class ConverterModule {
             await fs.remove(outputFile);
 
         } catch (error) {
-            return `❌ Failed to compress video: ${error.message}`;
+            await context.bot.sendMessage(context.sender, { text: `❌ Failed to compress video: ${error.message}` });
         }
     }
 
     // Currency Converter
     async convertCurrency(msg, params, context) {
         if (params.length < 3) {
-            return '❌ Usage: .currency <amount> <from> <to>\nExample: .currency 100 USD EUR';
+            return await context.bot.sendMessage(context.sender, { text: '❌ Usage: .currency <amount> <from> <to>\nExample: .currency 100 USD EUR' });
         }
 
         const amount = parseFloat(params[0]);
@@ -640,27 +670,29 @@ class ConverterModule {
         const toCurrency = params[2].toUpperCase();
 
         if (isNaN(amount)) {
-            return '❌ Invalid amount. Please provide a valid number.';
+            return await context.bot.sendMessage(context.sender, { text: '❌ Invalid amount. Please provide a valid number.' });
         }
 
         try {
             await this.updateExchangeRates();
             
             if (!this.exchangeRates[fromCurrency] || !this.exchangeRates[toCurrency]) {
-                return '❌ Invalid currency code. Please use valid 3-letter currency codes (e.g., USD, EUR, GBP).';
+                return await context.bot.sendMessage(context.sender, { text: '❌ Invalid currency code. Please use valid 3-letter currency codes (e.g., USD, EUR, GBP).' });
             }
 
             const fromRate = this.exchangeRates[fromCurrency];
             const toRate = this.exchangeRates[toCurrency];
             const convertedAmount = (amount / fromRate) * toRate;
 
-            return `💱 **Currency Conversion**\n\n` +
-                   `${amount} ${fromCurrency} = ${convertedAmount.toFixed(2)} ${toCurrency}\n\n` +
-                   `📊 Exchange Rate: 1 ${fromCurrency} = ${(toRate / fromRate).toFixed(4)} ${toCurrency}\n` +
-                   `⏰ Updated: ${new Date(this.ratesLastUpdated).toLocaleString()}`;
+            await context.bot.sendMessage(context.sender, { text: 
+                `💱 **Currency Conversion**\n\n` +
+                `${amount} ${fromCurrency} = ${convertedAmount.toFixed(2)} ${toCurrency}\n\n` +
+                `📊 Exchange Rate: 1 ${fromCurrency} = ${(toRate / fromRate).toFixed(4)} ${toCurrency}\n` +
+                `⏰ Updated: ${new Date(this.ratesLastUpdated).toLocaleString()}`
+            });
 
         } catch (error) {
-            return `❌ Failed to convert currency: ${error.message}`;
+            await context.bot.sendMessage(context.sender, { text: `❌ Failed to convert currency: ${error.message}` });
         }
     }
 
@@ -679,184 +711,107 @@ class ConverterModule {
         }
     }
 
-    // Unit Converters
-    async convertLength(msg, params, context) {
-        if (params.length < 3) {
-            return '❌ Usage: .length <value> <from> <to>\nExample: .length 100 cm m\n\nSupported units: mm, cm, m, km, in, ft, yd, mi';
+    // Unified Unit Converter
+    async convertUnit(msg, params, context) {
+        if (params.length < 4 || params[2].toLowerCase() !== 'to') {
+            return await context.bot.sendMessage(context.sender, { text: 
+                '❌ Usage: .unit <value> <from_unit> to <to_unit>\n' +
+                'Example: .unit 10 feet to inches\n\n' +
+                'Supported categories: length (mm, cm, m, km, in, ft, yd, mi), ' +
+                'weight (mg, g, kg, oz, lb, ton), ' +
+                'temperature (c, f, k), ' +
+                'area (mm2, cm2, m2, km2, in2, ft2, yd2, acre), ' +
+                'volume (ml, l, gal, qt, pt, cup, fl_oz)'
+            });
         }
 
         const value = parseFloat(params[0]);
-        const fromUnit = params[1].toLowerCase();
-        const toUnit = params[2].toLowerCase();
+        let fromUnit = params[1].toLowerCase();
+        let toUnit = params[3].toLowerCase();
 
         if (isNaN(value)) {
-            return '❌ Invalid value. Please provide a valid number.';
+            return await context.bot.sendMessage(context.sender, { text: '❌ Invalid value. Please provide a valid number.' });
         }
 
-        const lengthUnits = {
-            mm: 0.001,
-            cm: 0.01,
-            m: 1,
-            km: 1000,
-            in: 0.0254,
-            ft: 0.3048,
-            yd: 0.9144,
-            mi: 1609.34
-        };
-
-        if (!lengthUnits[fromUnit] || !lengthUnits[toUnit]) {
-            return '❌ Invalid unit. Supported: mm, cm, m, km, in, ft, yd, mi';
-        }
-
-        const meters = value * lengthUnits[fromUnit];
-        const result = meters / lengthUnits[toUnit];
-
-        return `📏 **Length Conversion**\n\n${value} ${fromUnit} = ${result.toFixed(6)} ${toUnit}`;
-    }
-
-    async convertWeight(msg, params, context) {
-        if (params.length < 3) {
-            return '❌ Usage: .weight <value> <from> <to>\nExample: .weight 100 kg lb\n\nSupported units: mg, g, kg, oz, lb, ton';
-        }
-
-        const value = parseFloat(params[0]);
-        const fromUnit = params[1].toLowerCase();
-        const toUnit = params[2].toLowerCase();
-
-        if (isNaN(value)) {
-            return '❌ Invalid value. Please provide a valid number.';
-        }
-
-        const weightUnits = {
-            mg: 0.000001,
-            g: 0.001,
-            kg: 1,
-            oz: 0.0283495,
-            lb: 0.453592,
-            ton: 1000
-        };
-
-        if (!weightUnits[fromUnit] || !weightUnits[toUnit]) {
-            return '❌ Invalid unit. Supported: mg, g, kg, oz, lb, ton';
-        }
-
-        const kilograms = value * weightUnits[fromUnit];
-        const result = kilograms / weightUnits[toUnit];
-
-        return `⚖️ **Weight Conversion**\n\n${value} ${fromUnit} = ${result.toFixed(6)} ${toUnit}`;
-    }
-
-    async convertTemperature(msg, params, context) {
-        if (params.length < 3) {
-            return '❌ Usage: .temp <value> <from> <to>\nExample: .temp 100 c f\n\nSupported units: c, f, k';
-        }
-
-        const value = parseFloat(params[0]);
-        const fromUnit = params[1].toLowerCase();
-        const toUnit = params[2].toLowerCase();
-
-        if (isNaN(value)) {
-            return '❌ Invalid value. Please provide a valid number.';
-        }
-
-        let celsius;
-        switch (fromUnit) {
-            case 'c':
-                celsius = value;
+        // Find category
+        let category = null;
+        for (const cat in this.units) {
+            if (this.units[cat][fromUnit] && this.units[cat][toUnit]) {
+                category = cat;
                 break;
-            case 'f':
-                celsius = (value - 32) * 5/9;
-                break;
-            case 'k':
-                celsius = value - 273.15;
-                break;
-            default:
-                return '❌ Invalid unit. Supported: c (Celsius), f (Fahrenheit), k (Kelvin)';
+            }
+        }
+
+        if (!category) {
+            return await context.bot.sendMessage(context.sender, { text: '❌ Invalid or mismatched units. Use units from the same category.' });
         }
 
         let result;
-        switch (toUnit) {
-            case 'c':
-                result = celsius;
-                break;
-            case 'f':
-                result = celsius * 9/5 + 32;
-                break;
-            case 'k':
-                result = celsius + 273.15;
-                break;
-            default:
-                return '❌ Invalid unit. Supported: c (Celsius), f (Fahrenheit), k (Kelvin)';
+        let symbol = '';
+
+        if (category === 'temperature') {
+            let celsius;
+            switch (fromUnit) {
+                case 'c':
+                    celsius = value;
+                    break;
+                case 'f':
+                    celsius = (value - 32) * 5/9;
+                    break;
+                case 'k':
+                    celsius = value - 273.15;
+                    break;
+            }
+
+            switch (toUnit) {
+                case 'c':
+                    result = celsius;
+                    break;
+                case 'f':
+                    result = celsius * 9/5 + 32;
+                    break;
+                case 'k':
+                    result = celsius + 273.15;
+                    break;
+            }
+            result = result.toFixed(2);
+            symbol = '°';
+            fromUnit = fromUnit.toUpperCase();
+            toUnit = toUnit.toUpperCase();
+
+            await context.bot.sendMessage(context.sender, { text: 
+                `🌡️ **Temperature Conversion**\n\n${value}${symbol}${fromUnit} = ${result}${symbol}${toUnit}`
+            });
+        } else {
+            const base = value * this.units[category][fromUnit];
+            result = base / this.units[category][toUnit];
+            result = result.toFixed(6);
+
+            let emoji = '';
+            let title = '';
+            switch (category) {
+                case 'length':
+                    emoji = '📏';
+                    title = 'Length';
+                    break;
+                case 'weight':
+                    emoji = '⚖️';
+                    title = 'Weight';
+                    break;
+                case 'area':
+                    emoji = '📐';
+                    title = 'Area';
+                    break;
+                case 'volume':
+                    emoji = '🥤';
+                    title = 'Volume';
+                    break;
+            }
+
+            await context.bot.sendMessage(context.sender, { text: 
+                `${emoji} **${title} Conversion**\n\n${value} ${fromUnit} = ${result} ${toUnit}`
+            });
         }
-
-        return `🌡️ **Temperature Conversion**\n\n${value}°${fromUnit.toUpperCase()} = ${result.toFixed(2)}°${toUnit.toUpperCase()}`;
-    }
-
-    async convertArea(msg, params, context) {
-        if (params.length < 3) {
-            return '❌ Usage: .area <value> <from> <to>\nExample: .area 100 m2 ft2\n\nSupported units: mm2, cm2, m2, km2, in2, ft2, yd2, acre';
-        }
-
-        const value = parseFloat(params[0]);
-        const fromUnit = params[1].toLowerCase();
-        const toUnit = params[2].toLowerCase();
-
-        if (isNaN(value)) {
-            return '❌ Invalid value. Please provide a valid number.';
-        }
-
-        const areaUnits = {
-            mm2: 0.000001,
-            cm2: 0.0001,
-            m2: 1,
-            km2: 1000000,
-            in2: 0.00064516,
-            ft2: 0.092903,
-            yd2: 0.836127,
-            acre: 4046.86
-        };
-
-        if (!areaUnits[fromUnit] || !areaUnits[toUnit]) {
-            return '❌ Invalid unit. Supported: mm2, cm2, m2, km2, in2, ft2, yd2, acre';
-        }
-
-        const squareMeters = value * areaUnits[fromUnit];
-        const result = squareMeters / areaUnits[toUnit];
-
-        return `📐 **Area Conversion**\n\n${value} ${fromUnit} = ${result.toFixed(6)} ${toUnit}`;
-    }
-
-    async convertVolume(msg, params, context) {
-        if (params.length < 3) {
-            return '❌ Usage: .volume <value> <from> <to>\nExample: .volume 100 ml l\n\nSupported units: ml, l, gal, qt, pt, cup, fl_oz';
-        }
-
-        const value = parseFloat(params[0]);
-        const fromUnit = params[1].toLowerCase();
-        const toUnit = params[2].toLowerCase();
-
-        if (isNaN(value)) {
-            return '❌ Invalid value. Please provide a valid number.';
-        }
-
-        const volumeUnits = {
-            ml: 0.001,
-            l: 1,
-            gal: 3.78541,
-            qt: 0.946353,
-            pt: 0.473176,
-            cup: 0.236588,
-            fl_oz: 0.0295735
-        };
-
-        if (!volumeUnits[fromUnit] || !volumeUnits[toUnit]) {
-            return '❌ Invalid unit. Supported: ml, l, gal, qt, pt, cup, fl_oz';
-        }
-
-        const liters = value * volumeUnits[fromUnit];
-        const result = liters / volumeUnits[toUnit];
-
-        return `🥤 **Volume Conversion**\n\n${value} ${fromUnit} = ${result.toFixed(6)} ${toUnit}`;
     }
 }
 
