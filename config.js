@@ -24,14 +24,14 @@ class Config {
             features: {
                 mode: 'public',                   // 'public' or 'private'
                 customModules: true,              // Enable custom modules
-                rateLimiting: true,              // Disable rate limiting for better performance
-                autoReply: false,                 // Auto reply to messages
-                typingIndicators: true,           // Show typing indicators
-                autoReadMessages: true,           // Auto read messages
-                autoViewStatus: false,            // Auto view status updates
-                telegramBridge: true,             // Sync with Telegram
-                respondToUnknownCommands: false, // Respond to unknown commands
-                sendPermissionError: false        // Send error for disallowed commands
+                rateLimiting: true,                // Disable rate limiting for better performance
+                autoReply: false,                  // Auto reply to messages
+                typingIndicators: true,            // Show typing indicators
+                autoReadMessages: true,            // Auto read messages
+                autoViewStatus: false,             // Auto view status updates
+                telegramBridge: true,              // Sync with Telegram
+                respondToUnknownCommands: false,   // Respond to unknown commands
+                sendPermissionError: false         // Send error for disallowed commands
             },
 
             mongo: {
@@ -96,22 +96,22 @@ class Config {
             
             // Security settings
             security: {
-                blockedUsers: [],                 // Array of blocked user IDs
-                maxFileSize: '10MB',  // Max size per log file
-                maxFiles: 5           // Max number of rotated files
+                blockedUsers: [],                 
+                maxFileSize: '10MB',  
+                maxFiles: 5           
+            },
+
+            // Messages configuration
+            messages: {
+                autoReplyText: 'Hello! This is an automated response. I\'ll get back to you soon.',
+                welcomeText: 'Welcome to the group!',
+                goodbyeText: 'Goodbye! Thanks for being part of our community.',
+                errorText: 'Something went wrong. Please try again later.'
             }
         };
 
         this.load();
     }
-    
-    // Messages configuration
-    messages: {
-        autoReplyText: 'Hello! This is an automated response. I\'ll get back to you soon.',
-        welcomeText: 'Welcome to the group!',
-        goodbyeText: 'Goodbye! Thanks for being part of our community.',
-        errorText: 'Something went wrong. Please try again later.'
-    },
 
     load() {
         this.config = { ...this.defaultConfig };
