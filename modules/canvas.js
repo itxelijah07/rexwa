@@ -8,32 +8,24 @@ class CanvasModule {
         this.name = 'canvas';
         this.metadata = {
             description: 'Create images, memes, and graphics using canvas',
-            version: '1.0.0',
+            version: '1.1.0',
             author: 'HyperWa Team',
             category: 'media'
         };
         
         this.commands = [
             {
-                name: 'meme',
+                name: 'cmeme',
                 description: 'Create a meme with top and bottom text',
                 usage: '.meme <top_text> | <bottom_text> (reply to image)',
                 permissions: 'public',
-                ui: {
-                    processingText: '🎭 *Creating Meme...*\n\n⏳ Adding text to image...',
-                    errorText: '❌ *Meme Creation Failed*'
-                },
                 execute: this.createMeme.bind(this)
             },
             {
-                name: 'quote',
+                name: 'cquote',
                 description: 'Create a quote image',
                 usage: '.quote <text> - <author>',
                 permissions: 'public',
-                ui: {
-                    processingText: '💭 *Creating Quote...*\n\n⏳ Designing quote image...',
-                    errorText: '❌ *Quote Creation Failed*'
-                },
                 execute: this.createQuote.bind(this)
             },
             {
@@ -41,10 +33,6 @@ class CanvasModule {
                 description: 'Create a text banner',
                 usage: '.banner <text>',
                 permissions: 'public',
-                ui: {
-                    processingText: '🎨 *Creating Banner...*\n\n⏳ Designing banner...',
-                    errorText: '❌ *Banner Creation Failed*'
-                },
                 execute: this.createBanner.bind(this)
             },
             {
@@ -52,10 +40,6 @@ class CanvasModule {
                 description: 'Create profile card',
                 usage: '.profile <name> <status> (reply to profile pic)',
                 permissions: 'public',
-                ui: {
-                    processingText: '👤 *Creating Profile Card...*\n\n⏳ Designing profile...',
-                    errorText: '❌ *Profile Creation Failed*'
-                },
                 execute: this.createProfile.bind(this)
             },
             {
@@ -63,10 +47,6 @@ class CanvasModule {
                 description: 'Create welcome image',
                 usage: '.welcome <name> (reply to profile pic)',
                 permissions: 'public',
-                ui: {
-                    processingText: '🎉 *Creating Welcome Image...*\n\n⏳ Preparing welcome card...',
-                    errorText: '❌ *Welcome Image Failed*'
-                },
                 execute: this.createWelcome.bind(this)
             },
             {
@@ -74,10 +54,6 @@ class CanvasModule {
                 description: 'Create achievement badge',
                 usage: '.achievement <title> <description>',
                 permissions: 'public',
-                ui: {
-                    processingText: '🏆 *Creating Achievement...*\n\n⏳ Designing badge...',
-                    errorText: '❌ *Achievement Creation Failed*'
-                },
                 execute: this.createAchievement.bind(this)
             },
             {
@@ -85,17 +61,26 @@ class CanvasModule {
                 description: 'Create gradient background',
                 usage: '.gradient <color1> <color2> [direction]',
                 permissions: 'public',
-                ui: {
-                    processingText: '🌈 *Creating Gradient...*\n\n⏳ Blending colors...',
-                    errorText: '❌ *Gradient Creation Failed*'
-                },
                 execute: this.createGradient.bind(this)
+            },
+            {
+                name: 'textimage',
+                description: 'Create image with text and customizable background',
+                usage: '.textimage <text> [color1] [color2] [font]',
+                permissions: 'public',
+                execute: this.createTextImage.bind(this)
+            },
+            {
+                name: 'discount',
+                description: 'Create discount offer image',
+                usage: '.discount <percentage> <text> [color1] [color2]',
+                permissions: 'public',
+                execute: this.createDiscount.bind(this)
             }
         ];
         
         this.tempDir = path.join(__dirname, '../temp');
     }
-
 
     async createMeme(msg, params, context) {
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
@@ -114,7 +99,6 @@ class CanvasModule {
         const bottomText = parts[1] || '';
 
         try {
-            // Download the image
             const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
             const stream = await downloadContentFromMessage(quotedMsg.imageMessage, 'image');
             const chunks = [];
@@ -123,23 +107,19 @@ class CanvasModule {
             }
             const imageBuffer = Buffer.concat(chunks);
 
-            // Load image and create canvas
             const image = await loadImage(imageBuffer);
             const canvas = createCanvas(image.width, image.height);
             const ctx = canvas.getContext('2d');
 
-            // Draw the image
             ctx.drawImage(image, 0, 0);
 
-            // Set text properties
             const fontSize = Math.max(20, image.width / 15);
-            ctx.font = `bold ${fontSize}px Arial`;
+            ctx.font = `bold ${fontSize}px Impact`;
             ctx.fillStyle = 'white';
             ctx.strokeStyle = 'black';
             ctx.lineWidth = fontSize / 15;
             ctx.textAlign = 'center';
 
-            // Draw top text
             if (topText) {
                 const lines = this.wrapText(ctx, topText.toUpperCase(), image.width - 20);
                 lines.forEach((line, index) => {
@@ -149,7 +129,6 @@ class CanvasModule {
                 });
             }
 
-            // Draw bottom text
             if (bottomText) {
                 const lines = this.wrapText(ctx, bottomText.toUpperCase(), image.width - 20);
                 lines.forEach((line, index) => {
@@ -167,7 +146,7 @@ class CanvasModule {
             });
 
         } catch (error) {
-            throw new Error(`Meme creation failed: ${error.message}`);
+            return `❌ *Meme Creation Failed*: ${error.message}`;
         }
     }
 
@@ -185,23 +164,20 @@ class CanvasModule {
             const canvas = createCanvas(800, 600);
             const ctx = canvas.getContext('2d');
 
-            // Create gradient background
             const gradient = ctx.createLinearGradient(0, 0, 800, 600);
             gradient.addColorStop(0, '#667eea');
             gradient.addColorStop(1, '#764ba2');
             ctx.fillStyle = gradient;
             ctx.fillRect(0, 0, 800, 600);
 
-            // Add quote marks background
             ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
             ctx.font = 'bold 200px serif';
             ctx.textAlign = 'center';
             ctx.fillText('"', 150, 200);
             ctx.fillText('"', 650, 500);
 
-            // Draw quote text
             ctx.fillStyle = 'white';
-            ctx.font = 'italic 36px serif';
+            ctx.font = 'italic 36px Georgia';
             ctx.textAlign = 'center';
             
             const quoteLines = this.wrapText(ctx, quote, 700);
@@ -211,7 +187,6 @@ class CanvasModule {
                 ctx.fillText(line, 400, startY + (index * 50));
             });
 
-            // Draw author
             ctx.font = 'bold 24px sans-serif';
             ctx.fillText(`— ${author}`, 400, startY + (quoteLines.length * 50) + 60);
 
@@ -223,7 +198,7 @@ class CanvasModule {
             });
 
         } catch (error) {
-            throw new Error(`Quote creation failed: ${error.message}`);
+            return `❌ *Quote Creation Failed*: ${error.message}`;
         }
     }
 
@@ -238,7 +213,6 @@ class CanvasModule {
             const canvas = createCanvas(1200, 300);
             const ctx = canvas.getContext('2d');
 
-            // Create animated-style background
             const gradient = ctx.createLinearGradient(0, 0, 1200, 300);
             gradient.addColorStop(0, '#ff6b6b');
             gradient.addColorStop(0.5, '#4ecdc4');
@@ -246,7 +220,6 @@ class CanvasModule {
             ctx.fillStyle = gradient;
             ctx.fillRect(0, 0, 1200, 300);
 
-            // Add decorative elements
             ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
             for (let i = 0; i < 20; i++) {
                 const x = Math.random() * 1200;
@@ -257,7 +230,6 @@ class CanvasModule {
                 ctx.fill();
             }
 
-            // Draw main text
             ctx.fillStyle = 'white';
             ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
             ctx.lineWidth = 3;
@@ -278,11 +250,11 @@ class CanvasModule {
 
             await context.bot.sendMessage(context.sender, {
                 image: buffer,
-                caption: `🎨 *Banner Created*\n\n📝 Text: "${text}"\n📏 Size: 1200x300\n⏰ ${new Date().toLocaleTimeString()}`
+                caption: `🎨 *Banner Created*\n\n📝 Sony Text: "${text}"\n📏 Size: 1200x300\n⏰ ${new Date().toLocaleTimeString()}`
             });
 
         } catch (error) {
-            throw new Error(`Banner creation failed: ${error.message}`);
+            return `❌ *Banner Creation Failed*: ${error.message}`;
         }
     }
 
@@ -299,14 +271,12 @@ class CanvasModule {
             const canvas = createCanvas(600, 200);
             const ctx = canvas.getContext('2d');
 
-            // Background
             const gradient = ctx.createLinearGradient(0, 0, 600, 200);
             gradient.addColorStop(0, '#2c3e50');
             gradient.addColorStop(1, '#34495e');
             ctx.fillStyle = gradient;
             ctx.fillRect(0, 0, 600, 200);
 
-            // Profile picture area
             let profileImage = null;
             if (quotedMsg?.imageMessage) {
                 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
@@ -319,7 +289,6 @@ class CanvasModule {
                 profileImage = await loadImage(imageBuffer);
             }
 
-            // Draw profile picture or placeholder
             ctx.save();
             ctx.beginPath();
             ctx.arc(100, 100, 60, 0, Math.PI * 2);
@@ -337,7 +306,6 @@ class CanvasModule {
             }
             ctx.restore();
 
-            // Profile info
             ctx.fillStyle = 'white';
             ctx.font = 'bold 32px Arial';
             ctx.textAlign = 'left';
@@ -347,7 +315,6 @@ class CanvasModule {
             ctx.fillStyle = '#bdc3c7';
             ctx.fillText(status, 180, 110);
 
-            // Status indicator
             ctx.fillStyle = status.toLowerCase().includes('online') ? '#2ecc71' : '#e74c3c';
             ctx.beginPath();
             ctx.arc(550, 50, 8, 0, Math.PI * 2);
@@ -361,7 +328,7 @@ class CanvasModule {
             });
 
         } catch (error) {
-            throw new Error(`Profile creation failed: ${error.message}`);
+            return `❌ *Profile Creation Failed*: ${error.message}`;
         }
     }
 
@@ -377,14 +344,12 @@ class CanvasModule {
             const canvas = createCanvas(800, 400);
             const ctx = canvas.getContext('2d');
 
-            // Background
             const gradient = ctx.createRadialGradient(400, 200, 0, 400, 200, 400);
             gradient.addColorStop(0, '#ff9a9e');
             gradient.addColorStop(1, '#fecfef');
             ctx.fillStyle = gradient;
             ctx.fillRect(0, 0, 800, 400);
 
-            // Decorative elements
             ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
             for (let i = 0; i < 30; i++) {
                 const x = Math.random() * 800;
@@ -395,7 +360,6 @@ class CanvasModule {
                 ctx.fill();
             }
 
-            // Profile picture
             let profileImage = null;
             if (quotedMsg?.imageMessage) {
                 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
@@ -408,7 +372,6 @@ class CanvasModule {
                 profileImage = await loadImage(imageBuffer);
             }
 
-            // Draw profile picture
             ctx.save();
             ctx.beginPath();
             ctx.arc(400, 150, 80, 0, Math.PI * 2);
@@ -426,7 +389,6 @@ class CanvasModule {
             }
             ctx.restore();
 
-            // Welcome text
             ctx.fillStyle = 'white';
             ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
             ctx.lineWidth = 2;
@@ -451,7 +413,7 @@ class CanvasModule {
             });
 
         } catch (error) {
-            throw new Error(`Welcome image creation failed: ${error.message}`);
+            return `❌ *Welcome Image Failed*: ${error.message}`;
         }
     }
 
@@ -467,25 +429,21 @@ class CanvasModule {
             const canvas = createCanvas(600, 200);
             const ctx = canvas.getContext('2d');
 
-            // Background
             const gradient = ctx.createLinearGradient(0, 0, 600, 200);
             gradient.addColorStop(0, '#f39c12');
             gradient.addColorStop(1, '#e67e22');
             ctx.fillStyle = gradient;
             ctx.fillRect(0, 0, 600, 200);
 
-            // Border
             ctx.strokeStyle = '#d35400';
             ctx.lineWidth = 4;
             ctx.strokeRect(10, 10, 580, 180);
 
-            // Trophy icon
             ctx.fillStyle = '#fff';
             ctx.font = 'bold 64px Arial';
             ctx.textAlign = 'center';
             ctx.fillText('🏆', 100, 120);
 
-            // Achievement text
             ctx.fillStyle = 'white';
             ctx.font = 'bold 28px Arial';
             ctx.textAlign = 'left';
@@ -509,7 +467,7 @@ class CanvasModule {
             });
 
         } catch (error) {
-            throw new Error(`Achievement creation failed: ${error.message}`);
+            return `❌ *Achievement Creation Failed*: ${error.message}`;
         }
     }
 
@@ -537,7 +495,7 @@ class CanvasModule {
                 case 'radial':
                     gradient = ctx.createRadialGradient(400, 300, 0, 400, 300, 400);
                     break;
-                default: // horizontal
+                default:
                     gradient = ctx.createLinearGradient(0, 0, 800, 0);
             }
 
@@ -546,7 +504,6 @@ class CanvasModule {
             ctx.fillStyle = gradient;
             ctx.fillRect(0, 0, 800, 600);
 
-            // Add color info text
             ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
             ctx.font = 'bold 24px Arial';
             ctx.textAlign = 'center';
@@ -562,11 +519,131 @@ class CanvasModule {
             });
 
         } catch (error) {
-            throw new Error(`Gradient creation failed: ${error.message}`);
+            return `❌ *Gradient Creation Failed*: ${error.message}`;
         }
     }
 
-    // Helper function to wrap text
+    async createTextImage(msg, params, context) {
+        if (params.length === 0) {
+            return '❌ *Text Image Creation*\n\nPlease provide text.\n\n💡 Usage: `.textimage <text> [color1] [color2] [font]`\n📝 Example: `.textimage Hello World #ff0000 #0000ff Arial`';
+        }
+
+        const text = params[0];
+        const color1 = params[1] || '#4b6cb7';
+        const color2 = params[2] || '#182848';
+        const font = params[3] || 'Arial';
+
+        try {
+            const canvas = createCanvas(800, 400);
+            const ctx = canvas.getContext('2d');
+
+            const gradient = ctx.createLinearGradient(0, 0, 800, 400);
+            gradient.addColorStop(0, color1);
+            gradient.addColorStop(1, color2);
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 800, 400);
+
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+            for (let i = 0; i < 20; i++) {
+                const x = Math.random() * 800;
+                const y = Math.random() * 400;
+                const size = Math.random() * 5 + 2;
+                ctx.beginPath();
+                ctx.arc(x, y, size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            ctx.fillStyle = 'white';
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.lineWidth = 3;
+            ctx.font = `bold 48px ${font}`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            const lines = this.wrapText(ctx, text, 700);
+            const startY = 200 - ((lines.length - 1) * 30);
+
+            lines.forEach((line, index) => {
+                const y = startY + (index * 60);
+                ctx.strokeText(line, 400, y);
+                ctx.fillText(line, 400, y);
+            });
+
+            const buffer = canvas.toBuffer('image/png');
+
+            await context.bot.sendMessage(context.sender, {
+                image: buffer,
+                caption: `🖼️ *Text Image Created*\n\n📝 Text: "${text}"\n🎨 Colors: ${color1} → ${color2}\n🖌️ Font: ${font}\n⏰ ${new Date().toLocaleTimeString()}`
+            });
+
+        } catch (error) {
+            return `❌ *Text Image Creation Failed*: ${error.message}`;
+        }
+    }
+
+    async createDiscount(msg, params, context) {
+        if (params.length < 2) {
+            return '❌ *Discount Image*\n\nPlease provide percentage and text.\n\n💡 Usage: `.discount <percentage> <text> [color1] [color2]`\n📝 Example: `.discount 20% Limited Time Offer #ff0000 #0000ff`';
+        }
+
+        const percentage = params[0];
+        const text = params.slice(1).join(' ');
+        const color1 = params[params.length - 2]?.startsWith('#') ? params[params.length - 2] : '#e91e63';
+        const color2 = params[params.length - 1]?.startsWith('#') ? params[params.length - 1] : '#ad1457';
+
+        try {
+            const canvas = createCanvas(800, 400);
+            const ctx = canvas.getContext('2d');
+
+            const gradient = ctx.createRadialGradient(400, 200, 0, 400, 200, 400);
+            gradient.addColorStop(0, color1);
+            gradient.addColorStop(1, color2);
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 800, 400);
+
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+            for (let i = 0; i < 30; i++) {
+                const x = Math.random() * 800;
+                const y = Math.random() * 400;
+                const size = Math.random() * 8 + 4;
+                ctx.beginPath();
+                ctx.arc(x, y, size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            ctx.fillStyle = 'white';
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+            ctx.lineWidth = 4;
+            ctx.font = 'bold 72px Arial';
+            ctx.textAlign = 'center';
+            ctx.strokeText(`${percentage} OFF`, 400, 150);
+            ctx.fillText(`${percentage} OFF`, 400, 150);
+
+            ctx.font = 'bold 36px Arial';
+            const lines = this.wrapText(ctx, text, 700);
+            const startY = 220 - ((lines.length - 1) * 20);
+
+            lines.forEach((line, index) => {
+                ctx.strokeText(line, 400, startY + (index * 50));
+                ctx.fillText(line, 400, startY + (index * 50));
+            });
+
+            ctx.font = '24px Arial';
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.fillText('Hurry! Limited Time Offer', 400, 350);
+
+            const buffer = canvas.toBuffer('image/png');
+
+            await context.bot.sendMessage(context.sender, {
+                image: buffer,
+                caption: `💸 *Discount Image Created*\n\n🎯 ${percentage} OFF\n📝 ${text}\n🎨 Colors: ${color1} → ${color2}\n⏰ ${new Date().toLocaleTimeString()}`
+            });
+
+        } catch (error) {
+            return `❌ *Discount Image Creation Failed*: ${error.message}`;
+        }
+    }
+
     wrapText(ctx, text, maxWidth) {
         const words = text.split(' ');
         const lines = [];
@@ -585,8 +662,6 @@ class CanvasModule {
         lines.push(currentLine);
         return lines;
     }
-
-
 }
 
 module.exports = CanvasModule;
