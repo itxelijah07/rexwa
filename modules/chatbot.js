@@ -521,31 +521,28 @@ Keep responses concise but informative. Be engaging and personable.`;
         if (!this.shouldRespondToChat(context)) return;
 
         try {
-            // Show typing indicator and presence
-            if (bot.sock) {
-                await bot.sock.presenceSubscribe(context.sender);
-                if (bot.enableTypingIndicators) {
-                    await bot.sock.sendPresenceUpdate('composing', context.sender);
-                }
+            // Get presence module for typing indicators
+            const presenceModule = bot.moduleLoader.getModule('presence');
+            
+            // Start typing if presence module is available
+            if (presenceModule) {
+                await presenceModule.startTyping(context.sender, bot);
             }
 
             const response = await this.generateChatResponse(msg, context, bot);
             
             if (response) {
-                // Stop typing indicator and update presence
-                if (bot.sock) {
-                    if (bot.enableTypingIndicators) {
-                        await bot.sock.sendPresenceUpdate('paused', context.sender);
-                    }
-                    // Update presence to available after responding
-                    await bot.sock.sendPresenceUpdate('available', context.sender);
+                // Stop typing and update presence
+                if (presenceModule) {
+                    await presenceModule.stopTyping(context.sender, bot);
+                    await presenceModule.setPresence('available', context.sender, bot);
                 }
                 
                 // Send response
                 const result = await bot.sendMessage(context.sender, { text: response });
                 
-                // Send read receipt after successful response
-                if (result && bot.autoReadMessages) {
+                // Send read receipt after successful response if presence module handles it
+                if (result && presenceModule && presenceModule.autoReadMessages) {
                     try {
                         await bot.sock.readMessages([msg.key]);
                     } catch (error) {
@@ -553,20 +550,18 @@ Keep responses concise but informative. Be engaging and personable.`;
                     }
                 }
             } else {
-                // Update presence even if no response
-                if (bot.sock) {
-                    await bot.sock.sendPresenceUpdate('paused', context.sender);
+                // Stop typing even if no response
+                if (presenceModule) {
+                    await presenceModule.stopTyping(context.sender, bot);
                 }
             }
 
         } catch (error) {
             logger.error('ChatBot response error:', error);
-            // Stop typing indicator and update presence on error
-            if (bot.sock) {
-                try {
-                    await bot.sock.sendPresenceUpdate('paused', context.sender);
-                    await bot.sock.sendPresenceUpdate('available', context.sender);
-                } catch {}
+            // Stop typing on error
+            if (presenceModule) {
+                await presenceModule.stopTyping(context.sender, bot);
+                await presenceModule.setPresence('available', context.sender, bot);
             }
         }
     }
