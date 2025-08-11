@@ -518,28 +518,6 @@ class HyperWaBot {
             return;
         }
 
-        // Enhanced auto-reply with user stats
-        if (!msg.key.fromMe && this.autoReply && !isJidNewsletter(msg.key?.remoteJid)) {
-            const userStats = this.getUserStats(msg.key.participant || msg.key.remoteJid);
-            const contactInfo = this.getContactInfo(msg.key.participant || msg.key.remoteJid);
-            
-            logger.info(`🤖 Auto-replying to: ${contactInfo?.name || msg.key.remoteJid} (${userStats.messageCount} messages)`);
-            
-            if (this.autoReadMessages) {
-                await this.sock.readMessages([msg.key]);
-            }
-            
-            let replyText = config.get('messages.autoReplyText', 'Hello there! This is an automated response.');
-            
-            // Personalize reply based on user history
-            if (userStats.messageCount > 10) {
-                replyText += `\n\nGood to hear from you again! 👋`;
-            } else if (userStats.messageCount === 0) {
-                replyText += `\n\nWelcome! This seems to be your first message. 🎉`;
-            }
-            
-            await this.sendMessageWithTyping({ text: replyText }, msg.key.remoteJid);
-        }
     }
 
     async sendMessageWithTyping(content, jid) {
@@ -640,12 +618,6 @@ class HyperWaBot {
     }
 
     // Configuration methods for new features
-    setAutoReply(enabled) {
-        this.autoReply = enabled;
-        config.set('features.autoReply', enabled);
-        logger.info(`🤖 Auto-reply ${enabled ? 'enabled' : 'disabled'}`);
-    }
-
     setTypingIndicators(enabled) {
         this.enableTypingIndicators = enabled;
         config.set('features.typingIndicators', enabled);
