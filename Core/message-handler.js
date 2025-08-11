@@ -1,6 +1,7 @@
 const logger = require('./logger');
 const config = require('../config');
 const rateLimiter = require('./rate-limiter');
+const { delay } = require('@whiskeysockets/baileys');
 
 class MessageHandler {
     constructor(bot) {
@@ -31,50 +32,60 @@ class MessageHandler {
         this.messageHooks.delete(hookName);
         logger.debug(`🗑️ Unregistered message hook: ${hookName}`);
     }
-    async handleMessages({ messages, type }) {
-        if (type !== 'notify') return;
 
-        for (const msg of messages) {
-            try {
-                await this.processMessage(msg);
-} catch (error) {
-    console.error('[UNCAUGHT ERROR]', error); // Full dump
-    logger.error('Error processing message:', error?.stack || error?.message || JSON.stringify(error));
-}
+    async processMessage(msg) {
+        try {
+            // Handle status messages
+            if (msg.key.remoteJid === 'status@broadcast') {
+                return this.handleStatusMessage(msg);
+            }
 
+            // Extract text from message (including captions)
+            const text = this.extractText(msg);
+            
+            // Check if it's a command (only for text messages, not media with captions)
+            const prefix = config.get('bot.prefix');
+            const isCommand = text && text.startsWith(prefix) && !this.hasMedia(msg);
+            
+            // Execute message hooks
+            await this.executeMessageHooks('pre_process', msg, text);
+            
+            if (isCommand) {
+                await this.handleCommand(msg, text);
+            } else {
+                // Handle non-command messages (including media)
+                await this.handleNonCommandMessage(msg, text);
+            }
 
+            // Execute post-process hooks
+            await this.executeMessageHooks('post_process', msg, text);
+
+            // FIXED: ALWAYS sync to Telegram if bridge is active (this was the main issue)
+            if (this.bot.telegramBridge) {
+                await this.bot.telegramBridge.syncMessage(msg, text);
+            }
+        } catch (error) {
+            logger.error('Error processing message:', {
+                messageId: msg.key?.id,
+                remoteJid: msg.key?.remoteJid,
+                error: error.message,
+                stack: error.stack
+            });
         }
     }
 
-    async processMessage(msg) {
-        // Handle status messages
-        if (msg.key.remoteJid === 'status@broadcast') {
-            return this.handleStatusMessage(msg);
-        }
+    async handleMessages({ messages, type }) {
+        if (type !== 'notify') return;
 
-        // Extract text from message (including captions)
-        const text = this.extractText(msg);
+        // Process messages concurrently but with limit to avoid overwhelming
+        const concurrencyLimit = 5;
+        const messageQueue = [...messages];
         
-        // Check if it's a command (only for text messages, not media with captions)
-        const prefix = config.get('bot.prefix');
-        const isCommand = text && text.startsWith(prefix) && !this.hasMedia(msg);
-        
-        // Execute message hooks
-        await this.executeMessageHooks('pre_process', msg, text);
-        
-        if (isCommand) {
-            await this.handleCommand(msg, text);
-        } else {
-            // Handle non-command messages (including media)
-            await this.handleNonCommandMessage(msg, text);
-        }
-
-        // Execute post-process hooks
-        await this.executeMessageHooks('post_process', msg, text);
-
-        // FIXED: ALWAYS sync to Telegram if bridge is active (this was the main issue)
-        if (this.bot.telegramBridge) {
-            await this.bot.telegramBridge.syncMessage(msg, text);
+        while (messageQueue.length > 0) {
+            const batch = messageQueue.splice(0, concurrencyLimit);
+            await Promise.allSettled(
+                batch.map(msg => this.processMessage(msg))
+            );
         }
     }
 
@@ -86,6 +97,17 @@ class MessageHandler {
             } catch (error) {
                 logger.error(`Error executing hook ${hookName}:`, error);
             }
+        }
+    }
+
+    async handleStatusMessage(msg) {
+        // Let status viewer module handle this
+        await this.executeMessageHooks('pre_process', msg, this.extractText(msg));
+
+        // Also sync status messages to Telegram
+        if (this.bot.telegramBridge) {
+            const text = this.extractText(msg);
+            await this.bot.telegramBridge.syncMessage(msg, text);
         }
     }
     // New method to check if message has media
@@ -101,17 +123,6 @@ class MessageHandler {
         );
     }
 
-    async handleStatusMessage(msg) {
-        // Let status viewer module handle this
-        await this.executeMessageHooks('pre_process', msg, this.extractText(msg));
-
-        // Also sync status messages to Telegram
-        if (this.bot.telegramBridge) {
-            const text = this.extractText(msg);
-            await this.bot.telegramBridge.syncMessage(msg, text);
-        }
-    }
-
 async handleCommand(msg, text) {
     const sender = msg.key.remoteJid;
     const participant = msg.key.participant || sender;
@@ -121,30 +132,34 @@ async handleCommand(msg, text) {
     const command = args[0].toLowerCase();
     const params = args.slice(1);
 
-    // Add presence and typing indicators for commands
-    try {
-        await this.bot.sock.readMessages([msg.key]);
-        await this.bot.sock.presenceSubscribe(sender);
-        await this.bot.sock.sendPresenceUpdate('composing', sender);
-    } catch (error) {
-        // Ignore presence errors
+    // Get presence module for typing indicators
+    const presenceModule = this.bot.moduleLoader.getModule('presence');
+    
+    // Start typing if presence module is available
+    if (presenceModule) {
+        await presenceModule.startTyping(sender, this.bot);
+    }
+
+    // Auto read messages if presence module is available
+    if (presenceModule && presenceModule.autoReadMessages) {
+        try {
+            await this.bot.sock.readMessages([msg.key]);
+        } catch (error) {
+            logger.debug('Auto read failed (non-critical):', error.message);
+        }
     }
 
 if (!this.checkPermissions(msg, command)) {
     if (config.get('features.sendPermissionError', false)) {
-        try {
-            await this.bot.sock.sendPresenceUpdate('paused', sender);
-        } catch (error) {
-            // Ignore presence errors
+        if (presenceModule) {
+            await presenceModule.stopTyping(sender, this.bot);
         }
         return this.bot.sendMessage(sender, {
             text: '❌ You don\'t have permission to use this command.'
         });
     }
-    try {
-        await this.bot.sock.sendPresenceUpdate('paused', sender);
-    } catch (error) {
-        // Ignore presence errors
+    if (presenceModule) {
+        await presenceModule.stopTyping(sender, this.bot);
     }
     return; // silently ignore
 }
@@ -154,10 +169,8 @@ if (!this.checkPermissions(msg, command)) {
         const canExecute = await rateLimiter.checkCommandLimit(userId);
         if (!canExecute) {
             const remainingTime = await rateLimiter.getRemainingTime(userId);
-            try {
-                await this.bot.sock.sendPresenceUpdate('paused', sender);
-            } catch (error) {
-                // Ignore presence errors
+            if (presenceModule) {
+                await presenceModule.stopTyping(sender, this.bot);
             }
             return this.bot.sendMessage(sender, {
                 text: `⏱️ Rate limit exceeded. Try again in ${Math.ceil(remainingTime / 1000)} seconds.`
@@ -169,93 +182,105 @@ if (!this.checkPermissions(msg, command)) {
     const respondToUnknown = config.get('features.respondToUnknownCommands', false);
 
     if (handler) {
-    try {
-        // Always add ⏳ reaction for ALL commands
-        await this.bot.sock.sendMessage(sender, {
-            react: { key: msg.key, text: '⏳' }
-        });
-    } catch (error) {
-        // Ignore reaction errors
-    }
-
-    try {
-        await handler.execute(msg, params, {
-            bot: this.bot,
-            sender,
-            participant,
-            isGroup: sender.endsWith('@g.us')
-        });
-
-        // Clear typing indicator on success
-        try {
-            await this.bot.sock.sendPresenceUpdate('paused', sender);
-        } catch (error) {
-            // Ignore presence errors
-        }
-
-        // Clear reaction on success for ALL commands
+        // Add reaction with error handling
         try {
             await this.bot.sock.sendMessage(sender, {
-                react: { key: msg.key, text: '' }
+                react: { key: msg.key, text: '⏳' }
             });
         } catch (error) {
-            // Ignore reaction errors
+            logger.debug('Reaction failed (non-critical):', error.message);
         }
 
-        logger.info(`✅ Command executed: ${command} by ${participant}`);
-
-        if (this.bot.telegramBridge) {
-            await this.bot.telegramBridge.logToTelegram('📝 Command Executed',
-                `Command: ${command}\nUser: ${participant}\nChat: ${sender}`);
-        }
-
-    } catch (error) {
-        // Clear typing indicator on error
         try {
-            await this.bot.sock.sendPresenceUpdate('paused', sender);
-        } catch (error) {
-            // Ignore presence errors
-        }
-
-        // Keep ❌ reaction on error (don't clear it)
-        try {
-            await this.bot.sock.sendMessage(sender, {
-                react: { key: msg.key, text: '❌' }
+            // Add timeout to prevent hanging commands
+            const commandTimeout = 30000; // 30 seconds
+            const commandPromise = handler.execute(msg, params, {
+                bot: this.bot,
+                sender,
+                participant,
+                isGroup: sender.endsWith('@g.us')
             });
+            
+            await Promise.race([
+                commandPromise,
+                new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Command timeout')), commandTimeout)
+                )
+            ]);
+
+            // Clear typing indicator on success
+            if (presenceModule) {
+                await presenceModule.stopTyping(sender, this.bot);
+                await presenceModule.setPresence('available', sender, this.bot);
+            }
+
+            // Clear reaction on success for ALL commands
+            try {
+                await this.bot.sock.sendMessage(sender, {
+                    react: { key: msg.key, text: '' }
+                });
+            } catch (error) {
+                logger.debug('Reaction failed (non-critical):', error.message);
+            }
+
+            logger.info(`✅ Command executed: ${command} by ${participant}`);
+
+            if (this.bot.telegramBridge) {
+                try {
+                    await this.bot.telegramBridge.logToTelegram('📝 Command Executed',
+                        `Command: ${command}\nUser: ${participant}\nChat: ${sender}`);
+                } catch (error) {
+                    logger.debug('Telegram logging failed (non-critical):', error.message);
+                }
+            }
+
         } catch (error) {
-            // Ignore reaction errors
+            // Clear typing indicator on error
+            if (presenceModule) {
+                await presenceModule.stopTyping(sender, this.bot);
+            }
+
+            // Keep ❌ reaction on error (don't clear it)
+            try {
+                await this.bot.sock.sendMessage(sender, {
+                    react: { key: msg.key, text: '❌' }
+                });
+            } catch (error) {
+                logger.debug('Reaction failed (non-critical):', error.message);
+            }
+
+            logger.error(`❌ Command failed: ${command} | ${error.message || 'No message'}`);
+            logger.debug(error.stack || error);
+
+            if (!error._handledBySmartError && error?.message) {
+                try {
+                    await this.bot.sendMessage(sender, {
+                        text: `❌ Command failed: ${error.message}`
+                    });
+                } catch (sendError) {
+                    logger.error('Failed to send error message:', sendError.message);
+                }
+            }
+
+            if (this.bot.telegramBridge) {
+                try {
+                    await this.bot.telegramBridge.logToTelegram('❌ Command Error',
+                        `Command: ${command}\nError: ${error.message}\nUser: ${participant}`);
+                } catch (logError) {
+                    logger.debug('Telegram error logging failed (non-critical):', logError.message);
+                }
+            }
         }
-
-        logger.error(`❌ Command failed: ${command} | ${error.message || 'No message'}`);
-        logger.debug(error.stack || error);
-
-        if (!error._handledBySmartError && error?.message) {
-            await this.bot.sendMessage(sender, {
-                text: `❌ Command failed: ${error.message}`
-            });
-        }
-
-        if (this.bot.telegramBridge) {
-            await this.bot.telegramBridge.logToTelegram('❌ Command Error',
-                `Command: ${command}\nError: ${error.message}\nUser: ${participant}`);
-        }
-    }
-
-
     } else if (respondToUnknown) {
-        try {
-            await this.bot.sock.sendPresenceUpdate('paused', sender);
-        } catch (error) {
-            // Ignore presence errors
+        if (presenceModule) {
+            await presenceModule.stopTyping(sender, this.bot);
         }
         await this.bot.sendMessage(sender, {
             text: `❓ Unknown command: ${command}\nType *${prefix}menu* for available commands.`
         });
     } else {
-        try {
-            await this.bot.sock.sendPresenceUpdate('paused', sender);
-        } catch (error) {
-            // Ignore presence errors
+        if (presenceModule) {
+            await presenceModule.stopTyping(sender, this.bot);
         }
     }
 }
