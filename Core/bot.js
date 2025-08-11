@@ -485,8 +485,7 @@ class HyperWaBot {
         if (upsert.type === 'notify') {
             for (const msg of upsert.messages) {
                 try {
-                    // Let modules handle the message processing
-                    await this.messageHandler.processMessage(msg);
+                    await this.processIncomingMessage(msg, upsert);
                 } catch (error) {
                     logger.warn('⚠️ Message processing error:', error.message);
                 }
@@ -498,6 +497,26 @@ class HyperWaBot {
         } catch (error) {
             logger.warn('⚠️ Original message handler error:', error.message);
         }
+    }
+
+    async processIncomingMessage(msg, upsert) {
+        const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
+        
+        if (!text) return;
+
+        // Handle special commands
+        if (text === "requestPlaceholder" && !upsert.requestId) {
+            const messageId = await this.sock.requestPlaceholderResend(msg.key);
+            logger.info('🔄 Requested placeholder resync, ID:', messageId);
+            return;
+        }
+
+        if (text === "onDemandHistSync") {
+            const messageId = await this.sock.fetchMessageHistory(50, msg.key, msg.messageTimestamp);
+            logger.info('📥 Requested on-demand sync, ID:', messageId);
+            return;
+        }
+
     }
 
     async onConnectionOpen() {
