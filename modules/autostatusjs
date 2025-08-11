@@ -4,7 +4,7 @@ const logger = require('../Core/logger');
 class StatusViewerModule {
     constructor(bot) {
         this.bot = bot;
-        this.name = 'statusviewer';
+        this.name = 'autostatus';
         this.metadata = {
             description: 'Automatically view and react to WhatsApp status updates',
             version: '1.0.0',
