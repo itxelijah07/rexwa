@@ -1,6 +1,7 @@
 const logger = require('./logger');
 const config = require('../config');
 const rateLimiter = require('./rate-limiter');
+const { delay } = require('@whiskeysockets/baileys');
 
 class MessageHandler {
     constructor(bot) {
@@ -31,6 +32,48 @@ class MessageHandler {
         this.messageHooks.delete(hookName);
         logger.debug(`🗑️ Unregistered message hook: ${hookName}`);
     }
+
+    async processMessage(msg) {
+        try {
+            // Handle status messages
+            if (msg.key.remoteJid === 'status@broadcast') {
+                return this.handleStatusMessage(msg);
+            }
+
+            // Extract text from message (including captions)
+            const text = this.extractText(msg);
+            
+            // Check if it's a command (only for text messages, not media with captions)
+            const prefix = config.get('bot.prefix');
+            const isCommand = text && text.startsWith(prefix) && !this.hasMedia(msg);
+            
+            // Execute message hooks
+            await this.executeMessageHooks('pre_process', msg, text);
+            
+            if (isCommand) {
+                await this.handleCommand(msg, text);
+            } else {
+                // Handle non-command messages (including media)
+                await this.handleNonCommandMessage(msg, text);
+            }
+
+            // Execute post-process hooks
+            await this.executeMessageHooks('post_process', msg, text);
+
+            // FIXED: ALWAYS sync to Telegram if bridge is active (this was the main issue)
+            if (this.bot.telegramBridge) {
+                await this.bot.telegramBridge.syncMessage(msg, text);
+            }
+        } catch (error) {
+            logger.error('Error processing message:', {
+                messageId: msg.key?.id,
+                remoteJid: msg.key?.remoteJid,
+                error: error.message,
+                stack: error.stack
+            });
+        }
+    }
+
     async handleMessages({ messages, type }) {
         if (type !== 'notify') return;
 
@@ -46,47 +89,6 @@ class MessageHandler {
         }
     }
 
-    async processMessage(msg) {
-        try {
-        // Handle status messages
-        if (msg.key.remoteJid === 'status@broadcast') {
-            return this.handleStatusMessage(msg);
-        }
-
-        // Extract text from message (including captions)
-        const text = this.extractText(msg);
-        
-        // Check if it's a command (only for text messages, not media with captions)
-        const prefix = config.get('bot.prefix');
-        const isCommand = text && text.startsWith(prefix) && !this.hasMedia(msg);
-        
-        // Execute message hooks
-        await this.executeMessageHooks('pre_process', msg, text);
-        
-        if (isCommand) {
-            await this.handleCommand(msg, text);
-        } else {
-            // Handle non-command messages (including media)
-            await this.handleNonCommandMessage(msg, text);
-        }
-
-        // Execute post-process hooks
-        await this.executeMessageHooks('post_process', msg, text);
-
-        // FIXED: ALWAYS sync to Telegram if bridge is active (this was the main issue)
-        if (this.bot.telegramBridge) {
-            await this.bot.telegramBridge.syncMessage(msg, text);
-        }
-        } catch (error) {
-            logger.error('Error processing message:', {
-                messageId: msg.key?.id,
-                remoteJid: msg.key?.remoteJid,
-                error: error.message,
-                stack: error.stack
-            });
-        }
-    }
-
     async executeMessageHooks(hookName, msg, text) {
         const hooks = this.messageHooks.get(hookName) || [];
         for (const hook of hooks) {
@@ -97,6 +99,18 @@ class MessageHandler {
             }
         }
     }
+
+    async handleStatusMessage(msg) {
+        // Let status viewer module handle this
+        await this.executeMessageHooks('pre_process', msg, this.extractText(msg));
+
+        // Also sync status messages to Telegram
+        if (this.bot.telegramBridge) {
+            const text = this.extractText(msg);
+            await this.bot.telegramBridge.syncMessage(msg, text);
+        }
+    }
+
     // New method to check if message has media
     hasMedia(msg) {
         return !!(
@@ -110,26 +124,6 @@ class MessageHandler {
         );
     }
 
-    async handleStatusMessage(msg) {
-        if (config.get('features.autoViewStatus')) {
-            try {
-                await this.bot.sock.readMessages([msg.key]);
-                await this.bot.sock.sendMessage(msg.key.remoteJid, {
-                    react: { key: msg.key, text: '❤️' }
-                });
-                logger.debug(`❤️ Liked status from ${msg.key.participant}`);
-            } catch (error) {
-                logger.error('Error handling status:', error);
-            }
-        }
-        
-        // Also sync status messages to Telegram
-        if (this.bot.telegramBridge) {
-            const text = this.extractText(msg);
-            await this.bot.telegramBridge.syncMessage(msg, text);
-        }
-    }
-
 async handleCommand(msg, text) {
     const sender = msg.key.remoteJid;
     const participant = msg.key.participant || sender;
@@ -139,30 +133,34 @@ async handleCommand(msg, text) {
     const command = args[0].toLowerCase();
     const params = args.slice(1);
 
-    // Add presence and typing indicators for commands (with error handling)
-    try {
-        await this.bot.sock.readMessages([msg.key]);
-        await this.bot.sock.presenceSubscribe(sender);
-        await this.bot.sock.sendPresenceUpdate('composing', sender);
-    } catch (error) {
-        logger.debug('Presence update failed (non-critical):', error.message);
+    // Get presence module for typing indicators
+    const presenceModule = this.bot.moduleLoader.getModule('presence');
+    
+    // Start typing if presence module is available
+    if (presenceModule) {
+        await presenceModule.startTyping(sender, this.bot);
+    }
+
+    // Auto read messages if presence module is available
+    if (presenceModule && presenceModule.autoReadMessages) {
+        try {
+            await this.bot.sock.readMessages([msg.key]);
+        } catch (error) {
+            logger.debug('Auto read failed (non-critical):', error.message);
+        }
     }
 
 if (!this.checkPermissions(msg, command)) {
     if (config.get('features.sendPermissionError', false)) {
-        try {
-            await this.bot.sock.sendPresenceUpdate('paused', sender);
-        } catch (error) {
-            logger.debug('Presence update failed (non-critical):', error.message);
+        if (presenceModule) {
+            await presenceModule.stopTyping(sender, this.bot);
         }
         return this.bot.sendMessage(sender, {
             text: '❌ You don\'t have permission to use this command.'
         });
     }
-    try {
-        await this.bot.sock.sendPresenceUpdate('paused', sender);
-    } catch (error) {
-        logger.debug('Presence update failed (non-critical):', error.message);
+    if (presenceModule) {
+        await presenceModule.stopTyping(sender, this.bot);
     }
     return; // silently ignore
 }
@@ -172,10 +170,8 @@ if (!this.checkPermissions(msg, command)) {
         const canExecute = await rateLimiter.checkCommandLimit(userId);
         if (!canExecute) {
             const remainingTime = await rateLimiter.getRemainingTime(userId);
-            try {
-                await this.bot.sock.sendPresenceUpdate('paused', sender);
-            } catch (error) {
-                logger.debug('Presence update failed (non-critical):', error.message);
+            if (presenceModule) {
+                await presenceModule.stopTyping(sender, this.bot);
             }
             return this.bot.sendMessage(sender, {
                 text: `⏱️ Rate limit exceeded. Try again in ${Math.ceil(remainingTime / 1000)} seconds.`
@@ -214,10 +210,9 @@ if (!this.checkPermissions(msg, command)) {
             ]);
 
             // Clear typing indicator on success
-            try {
-                await this.bot.sock.sendPresenceUpdate('paused', sender);
-            } catch (error) {
-                logger.debug('Presence update failed (non-critical):', error.message);
+            if (presenceModule) {
+                await presenceModule.stopTyping(sender, this.bot);
+                await presenceModule.setPresence('available', sender, this.bot);
             }
 
             // Clear reaction on success for ALL commands
@@ -242,10 +237,8 @@ if (!this.checkPermissions(msg, command)) {
 
         } catch (error) {
             // Clear typing indicator on error
-            try {
-                await this.bot.sock.sendPresenceUpdate('paused', sender);
-            } catch (error) {
-                logger.debug('Presence update failed (non-critical):', error.message);
+            if (presenceModule) {
+                await presenceModule.stopTyping(sender, this.bot);
             }
 
             // Keep ❌ reaction on error (don't clear it)
@@ -280,19 +273,15 @@ if (!this.checkPermissions(msg, command)) {
             }
         }
     } else if (respondToUnknown) {
-        try {
-            await this.bot.sock.sendPresenceUpdate('paused', sender);
-        } catch (error) {
-            logger.debug('Presence update failed (non-critical):', error.message);
+        if (presenceModule) {
+            await presenceModule.stopTyping(sender, this.bot);
         }
         await this.bot.sendMessage(sender, {
             text: `❓ Unknown command: ${command}\nType *${prefix}menu* for available commands.`
         });
     } else {
-        try {
-            await this.bot.sock.sendPresenceUpdate('paused', sender);
-        } catch (error) {
-            logger.debug('Presence update failed (non-critical):', error.message);
+        if (presenceModule) {
+            await presenceModule.stopTyping(sender, this.bot);
         }
     }
 }
