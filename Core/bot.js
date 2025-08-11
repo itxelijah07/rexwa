@@ -1,12 +1,9 @@
-
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, getAggregateVotesInPollMessage, isJidNewsletter, delay, proto } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs-extra');
 const path = require('path');
 const NodeCache = require('node-cache');
-
-// Import the custom store
-const { makeInMemoryStore } = require('./store'); // Adjust path as needed
+const { makeInMemoryStore } = require('./store'); 
 
 const config = require('../config');
 const logger = require('./logger');
@@ -31,7 +28,7 @@ class HyperWaBot {
         this.store = makeInMemoryStore({
             logger: logger.child({ module: 'store' }),
             filePath: config.get('store.filePath', './whatsapp-store.json'),
-            autoSaveInterval: config.get('store.autoSaveInterval', 30000) // Save every 30 seconds
+            autoSaveInterval: config.get('store.autoSaveInterval', 30000)
         });
 
         // Load existing store data on startup
@@ -43,9 +40,6 @@ class HyperWaBot {
             maxKeys: 500
         });
         this.onDemandMap = new Map();
-        this.autoReply = config.get('features.autoReply', false);
-        this.enableTypingIndicators = config.get('features.typingIndicators', true);
-        this.autoReadMessages = config.get('features.autoReadMessages', true);
         
         // Simple memory cleanup
         setInterval(() => {
@@ -169,6 +163,11 @@ class HyperWaBot {
                 generateHighQualityLinkPreview: true,
                 getMessage: this.getMessage.bind(this),
                 browser: ['HyperWa', 'Chrome', '3.0'],
+                // Enable message history for better message retrieval
+                syncFullHistory: false,
+                markOnlineOnConnect: true,
+                // Add firewall bypass
+                firewall: false
             });
 
             // CRITICAL: Bind store to socket events for data persistence
@@ -486,7 +485,8 @@ class HyperWaBot {
         if (upsert.type === 'notify') {
             for (const msg of upsert.messages) {
                 try {
-                    await this.processIncomingMessage(msg, upsert);
+                    // Let modules handle the message processing
+                    await this.messageHandler.processMessage(msg);
                 } catch (error) {
                     logger.warn('⚠️ Message processing error:', error.message);
                 }
@@ -499,48 +499,6 @@ class HyperWaBot {
             logger.warn('⚠️ Original message handler error:', error.message);
         }
     }
-
-    async processIncomingMessage(msg, upsert) {
-        const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
-        
-        if (!text) return;
-
-        // Handle special commands
-        if (text === "requestPlaceholder" && !upsert.requestId) {
-            const messageId = await this.sock.requestPlaceholderResend(msg.key);
-            logger.info('🔄 Requested placeholder resync, ID:', messageId);
-            return;
-        }
-
-        if (text === "onDemandHistSync") {
-            const messageId = await this.sock.fetchMessageHistory(50, msg.key, msg.messageTimestamp);
-            logger.info('📥 Requested on-demand sync, ID:', messageId);
-            return;
-        }
-
-    }
-
-    async sendMessageWithTyping(content, jid) {
-        if (!this.sock || !this.enableTypingIndicators) {
-            return await this.sock?.sendMessage(jid, content);
-        }
-
-        try {
-            await this.sock.presenceSubscribe(jid);
-            await delay(500);
-
-            await this.sock.sendPresenceUpdate('composing', jid);
-            await delay(2000);
-
-            await this.sock.sendPresenceUpdate('paused', jid);
-
-            return await this.sock.sendMessage(jid, content);
-        } catch (error) {
-            logger.warn('⚠️ Failed to send message with typing:', error.message);
-            return await this.sock.sendMessage(jid, content);
-        }
-    }
-
 
     async onConnectionOpen() {
         logger.info(`✅ Connected to WhatsApp! User: ${this.sock.user?.id || 'Unknown'}`);
@@ -605,31 +563,14 @@ class HyperWaBot {
         }
         return this.sock;
     }
+
     async sendMessage(jid, content) {
         if (!this.sock) {
             throw new Error('WhatsApp socket not initialized');
         }
         
-        if (this.enableTypingIndicators) {
-            return await this.sendMessageWithTyping(content, jid);
-        }
-        
         return await this.sock.sendMessage(jid, content);
     }
-
-    // Configuration methods for new features
-    setTypingIndicators(enabled) {
-        this.enableTypingIndicators = enabled;
-        config.set('features.typingIndicators', enabled);
-        logger.info(`⌨️ Typing indicators ${enabled ? 'enabled' : 'disabled'}`);
-    }
-
-    setAutoReadMessages(enabled) {
-        this.autoReadMessages = enabled;
-        config.set('features.autoReadMessages', enabled);
-        logger.info(`📖 Auto-read messages ${enabled ? 'enabled' : 'disabled'}`);
-    }
-
 
     async shutdown() {
         logger.info('🛑 Shutting down HyperWa Userbot...');
