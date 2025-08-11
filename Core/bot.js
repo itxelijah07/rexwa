@@ -4,9 +4,7 @@ const qrcode = require('qrcode-terminal');
 const fs = require('fs-extra');
 const path = require('path');
 const NodeCache = require('node-cache');
-
-// Import the custom store
-const { makeInMemoryStore } = require('./store'); // Adjust path as needed
+const { makeInMemoryStore } = require('./store'); 
 
 const config = require('../config');
 const logger = require('./logger');
@@ -169,13 +167,6 @@ class HyperWaBot {
                 generateHighQualityLinkPreview: true,
                 getMessage: this.getMessage.bind(this),
                 browser: ['HyperWa', 'Chrome', '3.0'],
-                // Add connection options for better stability
-                connectTimeoutMs: 60000,
-                defaultQueryTimeoutMs: 60000,
-                keepAliveIntervalMs: 10000,
-                // Reduce message retry attempts to avoid spam
-                retryRequestDelayMs: 250,
-                maxMsgRetryCount: 3,
                 // Enable message history for better message retrieval
                 syncFullHistory: false,
                 markOnlineOnConnect: true,
@@ -214,7 +205,6 @@ class HyperWaBot {
             setTimeout(() => this.startWhatsApp(), 5000);
         }
     }
-
     // Enhanced getMessage with store lookup
     async getMessage(key) {
         try {
