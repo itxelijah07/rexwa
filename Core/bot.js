@@ -205,17 +205,22 @@ class HyperWaBot {
 
     // Enhanced getMessage with store lookup
     async getMessage(key) {
-        // Try to get message from store first
-        if (key?.remoteJid && key?.id) {
-            const storedMessage = this.store.loadMessage(key.remoteJid, key.id);
-            if (storedMessage) {
-                logger.debug(`📨 Retrieved message from store: ${key.id}`);
-                return storedMessage;
+        try {
+            // Try to get message from store first
+            if (key?.remoteJid && key?.id) {
+                const storedMessage = this.store.loadMessage(key.remoteJid, key.id);
+                if (storedMessage) {
+                    logger.debug(`📨 Retrieved message from store: ${key.id}`);
+                    return storedMessage;
+                }
             }
+            
+            // Return undefined instead of fake message to avoid decryption issues
+            return undefined;
+        } catch (error) {
+            logger.warn('⚠️ Error retrieving message:', error.message);
+            return undefined;
         }
-        
-        // Fallback to empty message
-        return proto.Message.fromObject({ conversation: 'Message not found' });
     }
 
     // Store-powered helper methods
