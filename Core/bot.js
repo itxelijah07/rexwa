@@ -25,7 +25,6 @@ class HyperWaBot {
         this.qrCodeSent = false;
         this.useMongoAuth = config.get('auth.useMongoAuth', false);
         this.usePairingCode = process.argv.includes('--use-pairing-code');
-        this.doReplies = process.argv.includes('--do-reply');
         
         // External map to store retry counts of messages when decryption/encryption fails
         // Keep this out of the socket itself, so as to prevent a message decryption/encryption loop across socket restarts
@@ -339,33 +338,9 @@ class HyperWaBot {
                 logger.info('📥 Requested on-demand sync, ID:', messageId);
                 return;
             }
-
-            // Auto-reply functionality (if enabled)
-            if (!msg.key.fromMe && this.doReplies && !isJidNewsletter(msg.key?.remoteJid)) {
-                logger.info('🤖 Auto-replying to:', msg.key.remoteJid);
-                await this.sock.readMessages([msg.key]);
-                await this.sendMessageWTyping({ text: 'Hello there!' }, msg.key.remoteJid);
-            }
         }
     }
 
-    async sendMessageWTyping(msg, jid) {
-        try {
-            await this.sock.presenceSubscribe(jid);
-            await delay(500);
-
-            await this.sock.sendPresenceUpdate('composing', jid);
-            await delay(2000);
-
-            await this.sock.sendPresenceUpdate('paused', jid);
-
-            await this.sock.sendMessage(jid, msg);
-        } catch (error) {
-            logger.debug('Typing indicator failed (non-critical):', error.message);
-            // Still try to send the message
-            await this.sock.sendMessage(jid, msg);
-        }
-    }
 
     async onConnectionOpen() {
         logger.info(`✅ Connected to WhatsApp! User: ${this.sock.user?.id || 'Unknown'}`);
@@ -375,33 +350,6 @@ class HyperWaBot {
             logger.info(`👑 Owner set to: ${this.sock.user.id}`);
         }
 
-        // WARNING: THIS WILL SEND A WAM EXAMPLE AND THIS IS A ****CAPTURED MESSAGE.****
-        // DO NOT ACTUALLY ENABLE THIS UNLESS YOU MODIFIED THE FILE.JSON!!!!!
-        const sendWAMExample = false;
-        if (sendWAMExample) {
-            try {
-                const wamData = JSON.parse(await fs.readFile("./boot_analytics_test.json", "utf-8"));
-                const {
-                    header: {
-                        wamVersion,
-                        eventSequenceNumber,
-                    },
-                    events,
-                } = wamData;
-
-                const binaryInfo = new BinaryInfo({
-                    protocolVersion: wamVersion,
-                    sequence: eventSequenceNumber,
-                    events: events
-                });
-
-                const buffer = encodeWAM(binaryInfo);
-                const result = await this.sock.sendWAMBuffer(buffer);
-                logger.info('WAM buffer sent:', result);
-            } catch (error) {
-                logger.warn('WAM example failed:', error.message);
-            }
-        }
 
         if (this.telegramBridge) {
             try {
