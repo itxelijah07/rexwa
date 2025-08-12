@@ -12,6 +12,7 @@ const { connectDb } = require('../utils/db');
 const ModuleLoader = require('./module-loader');
 const { useMongoAuthState } = require('../utils/mongoAuthState');
 const { makeInMemoryStore } = require('./store'); 
+
 // External map to store retry counts of messages when decryption/encryption fails
 // Keep this out of the socket itself, so as to prevent a message decryption/encryption loop across socket restarts
 const msgRetryCounterCache = new NodeCache();
@@ -20,6 +21,7 @@ class HyperWaBot {
     constructor() {
         this.sock = null;
         this.store = makeInMemoryStore({ logger: logger.child({ module: 'store' }) }); // Initialize store
+        this.store.loadFromFile(); 
         this.authPath = './auth_info';
         this.messageHandler = new MessageHandler(this);
         this.telegramBridge = null;
@@ -74,8 +76,9 @@ class HyperWaBot {
         }
 
         await this.moduleLoader.loadModules();
+        this.store.loadFromFile();
         await this.startSock();
-
+     
         logger.info('✅ HyperWa Userbot initialized successfully!');
     }
 
