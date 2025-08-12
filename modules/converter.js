@@ -14,7 +14,7 @@ class ConverterModule {
         this.name = 'converter';
         this.metadata = {
             description: 'Advanced media and unit converter with audio/video processing',
-            version: '2.0.2',
+            version: '2.0.4',
             author: 'HyperWa Team',
             category: 'utility'
         };
@@ -31,8 +31,8 @@ class ConverterModule {
             // Media Converters
             {
                 name: 'sticker',
-                description: 'Convert image/video/text to sticker',
-                usage: '.sticker (reply to media or provide text)',
+                description: 'Convert image/text to sticker',
+                usage: '.sticker (reply to image or provide text)',
                 aliases: ['s'],
                 permissions: 'public',
                 execute: this.createStickerAuto.bind(this)
@@ -73,20 +73,6 @@ class ConverterModule {
                 execute: this.toMp4.bind(this)
             },
             {
-                name: 'togif2',
-                description: 'Convert video to GIF',
-                usage: '.togif2 (reply to video)',
-                permissions: 'public',
-                execute: this.videoToGif.bind(this)
-            },
-            {
-                name: 'enhance',
-                description: 'Enhance video quality',
-                usage: '.enhance (reply to video)',
-                permissions: 'public',
-                execute: this.enhanceVideo.bind(this)
-            },
-            {
                 name: 'denoise',
                 description: 'Remove noise from audio',
                 usage: '.denoise (reply to audio)',
@@ -100,13 +86,7 @@ class ConverterModule {
                 permissions: 'public',
                 execute: this.muteVideo.bind(this)
             },
-            {
-                name: 'compress',
-                description: 'Compress video file',
-                usage: '.compress (reply to video)',
-                permissions: 'public',
-                execute: this.compressVideo.bind(this)
-            },
+
             // Currency Converter
             {
                 name: 'currency',
@@ -122,7 +102,6 @@ class ConverterModule {
     async ensureTempDir() {
         try {
             await fs.ensureDir(this.tempDir);
-            // Verify write permissions
             const testFile = path.join(this.tempDir, 'test.txt');
             await fs.writeFile(testFile, 'test');
             await fs.remove(testFile);
@@ -132,201 +111,79 @@ class ConverterModule {
         }
     }
 
-    // Media Converters
- // Fixed video sticker processing method - Simple approach
-async createStickerAuto(msg, params, context) {
-    try {
-        let mediaBuffer;
-        let mediaType;
-        let isTextSticker = false;
-        let stickerOptions = {
-            pack: 'HyperWa Stickers',
-            author: 'HyperWa Bot',
-            categories: ['🤖', '💬'],
-            id: `hyperwa-${Date.now()}`,
-            quality: 50,
-            type: StickerTypes.DEFAULT
-        };
+    async createStickerAuto(msg, params, context) {
+        try {
+            let mediaBuffer;
+            let isTextSticker = false;
+            let stickerOptions = {
+                pack: 'HyperWa Stickers',
+                author: 'HyperWa Bot',
+                categories: ['🤖', '💬'],
+                id: `hyperwa-${Date.now()}`,
+                quality: 50,
+                type: StickerTypes.DEFAULT
+            };
 
-        const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+            const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
 
-        // --- CASE 1: Text Sticker ---
-        if (!quotedMsg && params.length > 0) {
-            const text = params.join(' ');
-            if (text.length > 100) {
-                return await context.bot.sendMessage(context.sender, { text: '❌ Text is too long. Please use up to 100 characters.' });
-            }
-            mediaBuffer = await this.createTextImage(text);
-            stickerOptions.pack = 'HyperWa Text Stickers';
-            stickerOptions.categories = ['📝', '💬'];
-            isTextSticker = true;
-        }
-
-        // --- CASE 2: Media Sticker ---
-        if (!isTextSticker) {
-            if (!quotedMsg) {
-                return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to an image or video to create a sticker.' });
+            // CASE 1: Text Sticker
+            if (!quotedMsg && params.length > 0) {
+                const text = params.join(' ');
+                if (text.length > 100) {
+                    return await context.bot.sendMessage(context.sender, { text: '❌ Text is too long. Please use up to 100 characters.' });
+                }
+                mediaBuffer = await this.createTextImage(text);
+                stickerOptions.pack = 'HyperWa Text Stickers';
+                stickerOptions.categories = ['📝', '💬'];
+                isTextSticker = true;
             }
 
-            // Video/GIF case
-            if (quotedMsg.videoMessage) {
-                const videoMessage = quotedMsg.videoMessage;
-                
-                // Validate video duration
-                if (videoMessage.seconds && videoMessage.seconds > 6) {
-                    return await context.bot.sendMessage(context.sender, { text: '❌ Video is too long. Please use a video of 6 seconds or less.' });
+            // CASE 2: Image Sticker
+            if (!isTextSticker) {
+                if (!quotedMsg) {
+                    return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to an image to create a sticker.' });
                 }
 
-                // Validate video file size (max 10MB)
-                if (videoMessage.fileLength && videoMessage.fileLength > 10 * 1024 * 1024) {
-                    return await context.bot.sendMessage(context.sender, { text: '❌ Video file is too large. Please use a video smaller than 10MB.' });
+                if (quotedMsg.videoMessage) {
+                    return await context.bot.sendMessage(context.sender, { text: '❌ Video stickers are not supported. Use .togif2 to convert a video to GIF.' });
                 }
 
-                // Send processing message
-                await context.bot.sendMessage(context.sender, { text: '⏳ Converting video to sticker...' });
-
-                stickerOptions.pack = 'HyperWa Animated';
-                stickerOptions.categories = ['🎬', '🎭'];
-                stickerOptions.type = StickerTypes.FULL;
-                stickerOptions.quality = 30;
-
-                try {
-                    // Download video
-                    const stream = await downloadContentFromMessage(videoMessage, 'video');
+                if (quotedMsg.imageMessage) {
+                    const stream = await downloadContentFromMessage(quotedMsg.imageMessage, 'image');
                     const chunks = [];
                     for await (const chunk of stream) chunks.push(chunk);
-                    const videoBuffer = Buffer.concat(chunks);
-
-                    // Additional size check after download
-                    if (videoBuffer.length > 10 * 1024 * 1024) {
-                        return await context.bot.sendMessage(context.sender, { text: '❌ Video file is too large. Please use a smaller video.' });
-                    }
-
-                    // Process video: video → gif → webp sticker
-                    mediaBuffer = await this.processVideoToSticker(videoBuffer);
-
-                } catch (error) {
-                    console.error(`Video sticker processing failed: ${error.message}`);
-                    return await context.bot.sendMessage(context.sender, { text: '❌ Failed to process video sticker. Please try with a different video.' });
+                    mediaBuffer = Buffer.concat(chunks);
+                } else {
+                    return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to a valid image.' });
                 }
-                mediaType = 'video';
             }
-            // Image case
-            else if (quotedMsg.imageMessage) {
-                const imageMessage = quotedMsg.imageMessage;
-                
-                // Validate image file size (max 5MB)
-                if (imageMessage.fileLength && imageMessage.fileLength > 5 * 1024 * 1024) {
-                    return await context.bot.sendMessage(context.sender, { text: '❌ Image file is too large. Please use an image smaller than 5MB.' });
-                }
 
-                const stream = await downloadContentFromMessage(imageMessage, 'image');
-                const chunks = [];
-                for await (const chunk of stream) chunks.push(chunk);
-                mediaBuffer = Buffer.concat(chunks);
-
-                // Additional size check after download
-                if (mediaBuffer.length > 5 * 1024 * 1024) {
-                    return await context.bot.sendMessage(context.sender, { text: '❌ Image file is too large. Please use a smaller image.' });
-                }
-
-                mediaType = 'image';
-            } else {
-                return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to a valid image or video.' });
+            if (!mediaBuffer) {
+                return await context.bot.sendMessage(context.sender, { text: '❌ No valid image or text provided for sticker creation.' });
             }
-        }
 
-        if (!mediaBuffer) {
-            return await context.bot.sendMessage(context.sender, { text: '❌ No valid media or text provided for sticker creation.' });
-        }
+            if (mediaBuffer.length > 1000000) {
+                return await context.bot.sendMessage(context.sender, { text: '❌ Image is too large. Please use an image smaller than 1MB.' });
+            }
 
-        // --- CREATE & SEND STICKER ---
-        const sticker = new Sticker(mediaBuffer, stickerOptions);
-        const stickerBuffer = await sticker.toBuffer();
+            const sticker = new Sticker(mediaBuffer, stickerOptions);
+            const stickerBuffer = await sticker.toBuffer();
 
-        // Verify sticker buffer is valid
-        if (!stickerBuffer || stickerBuffer.length === 0) {
-            throw new Error('Generated sticker buffer is empty or invalid');
-        }
+            if (!stickerBuffer || stickerBuffer.length === 0) {
+                throw new Error('Generated sticker buffer is empty or invalid');
+            }
 
-        // Final size check - if still too large, reject
-        if (stickerBuffer.length > 1000000) {
-            return await context.bot.sendMessage(context.sender, { text: '❌ Generated sticker is too large. Please use a shorter video or smaller image.' });
-        }
+            await context.bot.sendMessage(context.sender, { sticker: stickerBuffer });
 
-        await context.bot.sendMessage(context.sender, { sticker: stickerBuffer });
-
-    } catch (error) {
-        console.error(`Sticker creation failed: ${error.message}`);
-        await context.bot.sendMessage(context.sender, { text: `❌ Failed to create sticker: ${error.message}` });
-    }
-}
-
-// Simple video to sticker conversion: video → gif → webp
-async processVideoToSticker(videoBuffer) {
-    const inputFile = path.join(this.tempDir, `input_${Date.now()}.mp4`);
-    const gifFile = path.join(this.tempDir, `gif_${Date.now()}.gif`);
-    const outputFile = path.join(this.tempDir, `sticker_${Date.now()}.webp`);
-
-    try {
-        // Save video to temp file
-        await fs.writeFile(inputFile, videoBuffer);
-
-        // Step 1: Convert video to GIF with timeout
-        await execAsync(
-            `ffmpeg -y -i "${inputFile}" -vf "fps=15,scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2" -an -f gif "${gifFile}"`,
-            { timeout: 20000 }
-        );
-
-        // Check if GIF was created
-        if (!await fs.pathExists(gifFile)) {
-            throw new Error('Failed to create GIF from video');
-        }
-
-        // Step 2: Convert GIF to WebP sticker with timeout  
-        await execAsync(
-            `ffmpeg -y -i "${gifFile}" -c:v libwebp -vf "fps=15,scale=512:512" -loop 0 -an -vsync 0 "${outputFile}"`,
-            { timeout: 15000 }
-        );
-
-        // Check if WebP was created
-        if (!await fs.pathExists(outputFile)) {
-            throw new Error('Failed to create WebP sticker from GIF');
-        }
-
-        // Check output file size
-        const stats = await fs.stat(outputFile);
-        if (stats.size === 0) {
-            throw new Error('Output sticker file is empty');
-        }
-
-        // If WebP is too large (>800KB), reject it
-        if (stats.size > 800000) {
-            throw new Error('Generated sticker is too large. Please use a shorter video.');
-        }
-
-        const stickerBuffer = await fs.readFile(outputFile);
-        return stickerBuffer;
-
-    } catch (error) {
-        console.error(`Video to sticker conversion failed: ${error.message}`);
-        throw new Error(`Conversion failed: ${error.message}`);
-    } finally {
-        // Always cleanup temp files
-        try {
-            await fs.remove(inputFile).catch(() => {});
-            await fs.remove(gifFile).catch(() => {});
-            await fs.remove(outputFile).catch(() => {});
-        } catch (cleanupError) {
-            console.warn(`Cleanup failed: ${cleanupError.message}`);
+        } catch (error) {
+            console.error(`Sticker creation failed: ${error.message}`);
+            await context.bot.sendMessage(context.sender, { text: `❌ Failed to create sticker: ${error.message}` });
         }
     }
-}
-    // --- TEXT IMAGE GENERATOR ---
+
     async createTextImage(text) {
         try {
             const sharp = require('sharp');
-            
             const svg = `
                 <svg width="512" height="512" xmlns="http://www.w3.org/2000/svg">
                     <rect width="512" height="512" fill="#ffffff"/>
@@ -336,9 +193,7 @@ async processVideoToSticker(videoBuffer) {
                     </text>
                 </svg>
             `;
-            
             return await sharp(Buffer.from(svg)).png().toBuffer();
-            
         } catch (error) {
             console.warn('Sharp not available, using placeholder for text sticker');
             throw new Error('Text sticker creation requires image processing library (sharp)');
@@ -346,13 +201,12 @@ async processVideoToSticker(videoBuffer) {
     }
 
     async stickerToImage(msg, params, context) {
-        const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        
-        if (!quotedMsg?.stickerMessage) {
-            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to a sticker to convert it to image.' });
-        }
-
         try {
+            const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+            if (!quotedMsg?.stickerMessage) {
+                return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to a sticker to convert it to image.' });
+            }
+
             const stream = await downloadContentFromMessage(quotedMsg.stickerMessage, 'sticker');
             const chunks = [];
             for await (const chunk of stream) {
@@ -373,23 +227,23 @@ async processVideoToSticker(videoBuffer) {
                 caption: '🖼️ Sticker converted to image'
             });
 
-            // Cleanup
-            await fs.remove(inputFile);
-            await fs.remove(outputFile);
-
+            await Promise.all([
+                fs.remove(inputFile).catch(() => {}),
+                fs.remove(outputFile).catch(() => {})
+            ]);
         } catch (error) {
+            console.error(`Sticker to image conversion failed: ${error.message}`);
             await context.bot.sendMessage(context.sender, { text: `❌ Failed to convert sticker: ${error.message}` });
         }
     }
 
     async stickerToGif(msg, params, context) {
-        const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        
-        if (!quotedMsg?.stickerMessage) {
-            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to an animated sticker to convert it to GIF.' });
-        }
-
         try {
+            const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+            if (!quotedMsg?.stickerMessage) {
+                return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to an animated sticker to convert it to GIF.' });
+            }
+
             const stream = await downloadContentFromMessage(quotedMsg.stickerMessage, 'sticker');
             const chunks = [];
             for await (const chunk of stream) {
@@ -401,36 +255,52 @@ async processVideoToSticker(videoBuffer) {
             const outputFile = path.join(this.tempDir, `gif_${Date.now()}.gif`);
 
             await fs.writeFile(inputFile, buffer);
-            await execAsync(`ffmpeg -i "${inputFile}" -f gif "${outputFile}"`);
+            await execAsync(`ffmpeg -i "${inputFile}" -vf "fps=10,scale=320:320:force_original_aspect_ratio=decrease,pad=320:320:(ow-iw)/2:(oh-ih)/2:color=#00000000" -an -q:v 50 -f gif "${outputFile}"`);
 
-            const gifBuffer = await fs.readFile(outputFile);
+            let gifBuffer = await fs.readFile(outputFile);
 
-            await context.bot.sendMessage(context.sender, {
-                video: gifBuffer,
-                gifPlayback: true,
-                caption: '🎭 Sticker converted to GIF'
-            });
+            if (gifBuffer.length > 1000000) {
+                await execAsync(`ffmpeg -i "${inputFile}" -vf "fps=8,scale=240:240:force_original_aspect_ratio=decrease,pad=240:240:(ow-iw)/2:(oh-ih)/2:color=#00000000" -an -q:v 75 -f gif "${outputFile}"`);
+                gifBuffer = await fs.readFile(outputFile);
+                if (gifBuffer.length > 1000000) {
+                    await Promise.all([
+                        fs.remove(inputFile).catch(() => {}),
+                        fs.remove(outputFile).catch(() => {})
+                    ]);
+                    return await context.bot.sendMessage(context.sender, { text: '❌ Generated GIF is too large. Please try a smaller sticker.' });
+                }
+                await context.bot.sendMessage(context.sender, {
+                    video: gifBuffer,
+                    gifPlayback: true,
+                    caption: '🎭 Sticker converted to GIF (compressed)'
+                });
+            } else {
+                await context.bot.sendMessage(context.sender, {
+                    video: gifBuffer,
+                    gifPlayback: true,
+                    caption: '🎭 Sticker converted to GIF'
+                });
+            }
 
-            // Cleanup
-            await fs.remove(inputFile);
-            await fs.remove(outputFile);
-
+            await Promise.all([
+                fs.remove(inputFile).catch(() => {}),
+                fs.remove(outputFile).catch(() => {})
+            ]);
         } catch (error) {
+            console.error(`Sticker to GIF conversion failed: ${error.message}`);
             await context.bot.sendMessage(context.sender, { text: `❌ Failed to convert sticker to GIF: ${error.message}` });
         }
     }
 
     async audioToVoiceNote(msg, params, context) {
-        const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        
-        if (!quotedMsg?.audioMessage && !quotedMsg?.videoMessage) {
-            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to an audio or video file to convert to voice note.' });
-        }
-
         try {
+            const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+            if (!quotedMsg?.audioMessage && !quotedMsg?.videoMessage) {
+                return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to an audio or video file to convert to voice note.' });
+            }
+
             const mediaType = quotedMsg.audioMessage ? 'audio' : 'video';
             const mediaMessage = quotedMsg[`${mediaType}Message`];
-            
             const stream = await downloadContentFromMessage(mediaMessage, mediaType);
             const chunks = [];
             for await (const chunk of stream) {
@@ -452,26 +322,25 @@ async processVideoToSticker(videoBuffer) {
                 ptt: true
             });
 
-            // Cleanup
-            await fs.remove(inputFile);
-            await fs.remove(outputFile);
-
+            await Promise.all([
+                fs.remove(inputFile).catch(() => {}),
+                fs.remove(outputFile).catch(() => {})
+            ]);
         } catch (error) {
+            console.error(`Voice note conversion failed: ${error.message}`);
             await context.bot.sendMessage(context.sender, { text: `❌ Failed to convert to voice note: ${error.message}` });
         }
     }
 
     async toMp3(msg, params, context) {
-        const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        
-        if (!quotedMsg?.audioMessage && !quotedMsg?.videoMessage) {
-            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to an audio or video file to convert to MP3.' });
-        }
-
         try {
+            const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+            if (!quotedMsg?.audioMessage && !quotedMsg?.videoMessage) {
+                return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to an audio or video file to convert to MP3.' });
+            }
+
             const mediaType = quotedMsg.audioMessage ? 'audio' : 'video';
             const mediaMessage = quotedMsg[`${mediaType}Message`];
-            
             const stream = await downloadContentFromMessage(mediaMessage, mediaType);
             const chunks = [];
             for await (const chunk of stream) {
@@ -492,23 +361,23 @@ async processVideoToSticker(videoBuffer) {
                 mimetype: 'audio/mpeg'
             });
 
-            // Cleanup
-            await fs.remove(inputFile);
-            await fs.remove(outputFile);
-
+            await Promise.all([
+                fs.remove(inputFile).catch(() => {}),
+                fs.remove(outputFile).catch(() => {})
+            ]);
         } catch (error) {
+            console.error(`MP3 conversion failed: ${error.message}`);
             await context.bot.sendMessage(context.sender, { text: `❌ Failed to convert to MP3: ${error.message}` });
         }
     }
 
     async toMp4(msg, params, context) {
-        const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        
-        if (!quotedMsg?.videoMessage) {
-            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to a video file to convert to MP4.' });
-        }
-
         try {
+            const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+            if (!quotedMsg?.videoMessage) {
+                return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to a video file to convert to MP4.' });
+            }
+
             const stream = await downloadContentFromMessage(quotedMsg.videoMessage, 'video');
             const chunks = [];
             for await (const chunk of stream) {
@@ -529,100 +398,24 @@ async processVideoToSticker(videoBuffer) {
                 caption: '🎥 Converted to MP4'
             });
 
-            // Cleanup
-            await fs.remove(inputFile);
-            await fs.remove(outputFile);
-
+            await Promise.all([
+                fs.remove(inputFile).catch(() => {}),
+                fs.remove(outputFile).catch(() => {})
+            ]);
         } catch (error) {
+            console.error(`MP4 conversion failed: ${error.message}`);
             await context.bot.sendMessage(context.sender, { text: `❌ Failed to convert to MP4: ${error.message}` });
         }
     }
 
-    async videoToGif(msg, params, context) {
-        const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        
-        if (!quotedMsg?.videoMessage) {
-            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to a video file to convert to GIF.' });
-        }
-
-        try {
-            const stream = await downloadContentFromMessage(quotedMsg.videoMessage, 'video');
-            const chunks = [];
-            for await (const chunk of stream) {
-                chunks.push(chunk);
-            }
-            const buffer = Buffer.concat(chunks);
-
-            const inputFile = path.join(this.tempDir, `input_${Date.now()}.mp4`);
-            const outputFile = path.join(this.tempDir, `gif_${Date.now()}.gif`);
-
-            await fs.writeFile(inputFile, buffer);
-            await execAsync(`ffmpeg -i "${inputFile}" -vf "fps=10,scale=320:-1:flags=lanczos" -f gif "${outputFile}"`);
-
-            const gifBuffer = await fs.readFile(outputFile);
-
-            await context.bot.sendMessage(context.sender, {
-                video: gifBuffer,
-                gifPlayback: true,
-                caption: '🎭 Video converted to GIF'
-            });
-
-            // Cleanup
-            await fs.remove(inputFile);
-            await fs.remove(outputFile);
-
-        } catch (error) {
-            await context.bot.sendMessage(context.sender, { text: `❌ Failed to convert video to GIF: ${error.message}` });
-        }
-    }
-
-    async enhanceVideo(msg, params, context) {
-        const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        
-        if (!quotedMsg?.videoMessage) {
-            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to a video file to enhance quality.' });
-        }
-
-        try {
-            const stream = await downloadContentFromMessage(quotedMsg.videoMessage, 'video');
-            const chunks = [];
-            for await (const chunk of stream) {
-                chunks.push(chunk);
-            }
-            const buffer = Buffer.concat(chunks);
-
-            const inputFile = path.join(this.tempDir, `input_${Date.now()}.mp4`);
-            const outputFile = path.join(this.tempDir, `enhanced_${Date.now()}.mp4`);
-
-            await fs.writeFile(inputFile, buffer);
-            
-            // Enhance video with upscaling and noise reduction
-            await execAsync(`ffmpeg -i "${inputFile}" -vf "scale=iw*2:ih*2:flags=lanczos,unsharp=5:5:1.0:5:5:0.0" -c:v libx264 -crf 18 -preset slow "${outputFile}"`);
-
-            const enhancedBuffer = await fs.readFile(outputFile);
-
-            await context.bot.sendMessage(context.sender, {
-                video: enhancedBuffer,
-                caption: '✨ Video quality enhanced'
-            });
-
-            // Cleanup
-            await fs.remove(inputFile);
-            await fs.remove(outputFile);
-
-        } catch (error) {
-            await context.bot.sendMessage(context.sender, { text: `❌ Failed to enhance video: ${error.message}` });
-        }
-    }
 
     async denoiseAudio(msg, params, context) {
-        const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        
-        if (!quotedMsg?.audioMessage) {
-            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to an audio file to remove noise.' });
-        }
-
         try {
+            const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+            if (!quotedMsg?.audioMessage) {
+                return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to an audio file to remove noise.' });
+            }
+
             const stream = await downloadContentFromMessage(quotedMsg.audioMessage, 'audio');
             const chunks = [];
             for await (const chunk of stream) {
@@ -634,8 +427,6 @@ async processVideoToSticker(videoBuffer) {
             const outputFile = path.join(this.tempDir, `denoised_${Date.now()}.mp3`);
 
             await fs.writeFile(inputFile, buffer);
-            
-            // Apply noise reduction filter
             await execAsync(`ffmpeg -i "${inputFile}" -af "highpass=f=200,lowpass=f=3000,afftdn" -c:a libmp3lame -b:a 128k "${outputFile}"`);
 
             const denoisedBuffer = await fs.readFile(outputFile);
@@ -646,23 +437,23 @@ async processVideoToSticker(videoBuffer) {
                 caption: '🔇 Noise removed from audio'
             });
 
-            // Cleanup
-            await fs.remove(inputFile);
-            await fs.remove(outputFile);
-
+            await Promise.all([
+                fs.remove(inputFile).catch(() => {}),
+                fs.remove(outputFile).catch(() => {})
+            ]);
         } catch (error) {
+            console.error(`Audio denoising failed: ${error.message}`);
             await context.bot.sendMessage(context.sender, { text: `❌ Failed to denoise audio: ${error.message}` });
         }
     }
 
     async muteVideo(msg, params, context) {
-        const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        
-        if (!quotedMsg?.videoMessage) {
-            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to a video file to mute.' });
-        }
-
         try {
+            const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+            if (!quotedMsg?.videoMessage) {
+                return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to a video file to mute.' });
+            }
+
             const stream = await downloadContentFromMessage(quotedMsg.videoMessage, 'video');
             const chunks = [];
             for await (const chunk of stream) {
@@ -683,74 +474,32 @@ async processVideoToSticker(videoBuffer) {
                 caption: '🔇 Video muted (audio removed)'
             });
 
-            // Cleanup
-            await fs.remove(inputFile);
-            await fs.remove(outputFile);
-
+            await Promise.all([
+                fs.remove(inputFile).catch(() => {}),
+                fs.remove(outputFile).catch(() => {})
+            ]);
         } catch (error) {
+            console.error(`Video muting failed: ${error.message}`);
             await context.bot.sendMessage(context.sender, { text: `❌ Failed to mute video: ${error.message}` });
         }
     }
 
-    async compressVideo(msg, params, context) {
-        const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        
-        if (!quotedMsg?.videoMessage) {
-            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to a video file to compress.' });
-        }
-
-        try {
-            const stream = await downloadContentFromMessage(quotedMsg.videoMessage, 'video');
-            const chunks = [];
-            for await (const chunk of stream) {
-                chunks.push(chunk);
-            }
-            const buffer = Buffer.concat(chunks);
-
-            const inputFile = path.join(this.tempDir, `input_${Date.now()}.mp4`);
-            const outputFile = path.join(this.tempDir, `compressed_${Date.now()}.mp4`);
-
-            await fs.writeFile(inputFile, buffer);
-            
-            // Compress video with higher CRF value
-            await execAsync(`ffmpeg -i "${inputFile}" -c:v libx264 -crf 28 -preset fast -c:a aac -b:a 64k "${outputFile}"`);
-
-            const compressedBuffer = await fs.readFile(outputFile);
-            const originalSize = buffer.length;
-            const compressedSize = compressedBuffer.length;
-            const compressionRatio = ((originalSize - compressedSize) / originalSize * 100).toFixed(1);
-
-            await context.bot.sendMessage(context.sender, {
-                video: compressedBuffer,
-                caption: `📦 Video compressed\n💾 Size reduced by ${compressionRatio}%`
-            });
-
-            // Cleanup
-            await fs.remove(inputFile);
-            await fs.remove(outputFile);
-
-        } catch (error) {
-            await context.bot.sendMessage(context.sender, { text: `❌ Failed to compress video: ${error.message}` });
-        }
-    }
-
-    // Currency Converter
+  
     async convertCurrency(msg, params, context) {
-        if (params.length < 3) {
-            return await context.bot.sendMessage(context.sender, { text: '❌ Usage: .currency <amount> <from> <to>\nExample: .currency 100 USD EUR' });
-        }
-
-        const amount = parseFloat(params[0]);
-        const fromCurrency = params[1].toUpperCase();
-        const toCurrency = params[2].toUpperCase();
-
-        if (isNaN(amount)) {
-            return await context.bot.sendMessage(context.sender, { text: '❌ Invalid amount. Please provide a valid number.' });
-        }
-
         try {
+            if (params.length < 3) {
+                return await context.bot.sendMessage(context.sender, { text: '❌ Usage: .currency <amount> <from> <to>\nExample: .currency 100 USD EUR' });
+            }
+
+            const amount = parseFloat(params[0]);
+            const fromCurrency = params[1].toUpperCase();
+            const toCurrency = params[2].toUpperCase();
+
+            if (isNaN(amount)) {
+                return await context.bot.sendMessage(context.sender, { text: '❌ Invalid amount. Please provide a valid number.' });
+            }
+
             await this.updateExchangeRates();
-            
             if (!this.exchangeRates[fromCurrency] || !this.exchangeRates[toCurrency]) {
                 return await context.bot.sendMessage(context.sender, { text: '❌ Invalid currency code. Please use valid 3-letter currency codes (e.g., USD, EUR, GBP).' });
             }
@@ -759,14 +508,14 @@ async processVideoToSticker(videoBuffer) {
             const toRate = this.exchangeRates[toCurrency];
             const convertedAmount = (amount / fromRate) * toRate;
 
-            await context.bot.sendMessage(context.sender, { text: 
-                `💱 **Currency Conversion**\n\n` +
-                `${amount} ${fromCurrency} = ${convertedAmount.toFixed(2)} ${toCurrency}\n\n` +
-                `📊 Exchange Rate: 1 ${fromCurrency} = ${(toRate / fromRate).toFixed(4)} ${toCurrency}\n` +
-                `⏰ Updated: ${new Date(this.ratesLastUpdated).toLocaleString()}`
+            await context.bot.sendMessage(context.sender, {
+                text: `💱 **Currency Conversion**\n\n` +
+                      `${amount} ${fromCurrency} = ${convertedAmount.toFixed(2)} ${toCurrency}\n\n` +
+                      `📊 Exchange Rate: 1 ${fromCurrency} = ${(toRate / fromRate).toFixed(4)} ${toCurrency}\n` +
+                      `⏰ Updated: ${new Date(this.ratesLastUpdated).toLocaleString()}`
             });
-
         } catch (error) {
+            console.error(`Currency conversion failed: ${error.message}`);
             await context.bot.sendMessage(context.sender, { text: `❌ Failed to convert currency: ${error.message}` });
         }
     }
@@ -774,7 +523,7 @@ async processVideoToSticker(videoBuffer) {
     async updateExchangeRates() {
         const now = Date.now();
         if (this.exchangeRates && (now - this.ratesLastUpdated) < this.ratesCacheTime) {
-            return; // Use cached rates
+            return;
         }
 
         try {
