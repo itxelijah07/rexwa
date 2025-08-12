@@ -8,7 +8,7 @@ const {
     isJidNewsletter,
     delay,
     proto,
-    makeInMemoryStore,
+    makeInMemoryStore
 } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const qrcode = require('qrcode-terminal');
@@ -21,8 +21,8 @@ const MessageHandler = require('./message-handler');
 const { connectDb } = require('../utils/db');
 const ModuleLoader = require('./module-loader');
 const { useMongoAuthState } = require('../utils/mongoAuthState');
-const storePath = './auth_info/baileys-store.json';
-// External retry cache (critical)
+
+// External retry cache
 const msgRetryCounterCache = new NodeCache();
 
 class HyperWaBot {
@@ -36,19 +36,23 @@ class HyperWaBot {
         this.moduleLoader = new ModuleLoader(this);
         this.useMongoAuth = config.get('auth.useMongoAuth', false);
 
-        // 👉 Replace manual Map with makeInMemoryStore
+        // Use makeInMemoryStore
         this.store = makeInMemoryStore({
             logger: logger.child({ module: 'baileys-store' })
         });
 
-        // Ensure data dir exists
-        const storePath = './data/baileys-store.json';
-        if (!fs.existsSync('./data')) fs.mkdirSync('./data', { recursive: true });
+        // 👉 Save store inside auth_info folder
+        const storePath = './auth_info/baileys-store.json';
 
-        // Load store from disk
+        // Ensure auth_info exists
+        if (!fs.existsSync('./auth_info')) {
+            fs.mkdirSync('./auth_info', { recursive: true });
+        }
+
+        // Load store if exists
         if (fs.existsSync(storePath)) {
             this.store.readFromFile(storePath);
-            logger.info('📁 Loaded message store from disk');
+            logger.info('📁 Message store loaded from auth_info');
         }
 
         // Save every 10 seconds
@@ -95,7 +99,6 @@ class HyperWaBot {
     async startSock() {
         let state, saveCreds;
 
-        // Clean up existing socket
         if (this.sock) {
             logger.info('🧹 Cleaning up existing WhatsApp socket');
             this.sock.ev.removeAllListeners();
@@ -103,7 +106,6 @@ class HyperWaBot {
             this.sock = null;
         }
 
-        // Choose auth method
         if (this.useMongoAuth) {
             logger.info('🔧 Using MongoDB auth state...');
             try {
@@ -136,11 +138,9 @@ class HyperWaBot {
                 syncFullHistory: false,
                 markOnlineOnConnect: true,
                 firewall: false,
-                // 👉 Pass store
                 store: this.store,
             });
 
-            // 👉 Bind store to socket events
             this.store.bind(this.sock.ev);
 
             this.sock.ev.process(async (events) => {
@@ -189,24 +189,26 @@ class HyperWaBot {
                     logger.info('Connection update:', events['connection.update']);
                 }
 
-                // Save credentials
                 if (events['creds.update']) {
                     try {
                         await saveCreds();
                     } catch (err) {
-                        logger.warn('⚠️ Failed to save creds:', err.message);
+                        logger.warn('⚠️ Failed to save credentials:', err.message);
                     }
                 }
 
-                // Handle messages
+                if (events['stream-resumed']) {
+                    logger.info('📶 Connection resumed. Syncing...');
+                    await this.sock.sendPresenceUpdate('available');
+                }
+
                 if (events['messages.upsert']) {
                     const upsert = events['messages.upsert'];
                     logger.debug('📨 Received messages:', JSON.stringify(upsert, null, 2));
 
-                    // 👉 Handle "Waiting for message..." (messageStubType 20)
                     for (const msg of upsert.messages) {
                         if (msg.messageStubType === 20 && !msg.key.fromMe) {
-                            logger.warn(`📩 Placeholder detected from ${msg.key.remoteJid}, requesting resend...`);
+                            logger.warn(`📩 Placeholder from ${msg.key.remoteJid}, requesting resend...`);
                             try {
                                 await this.sock.readMessages([msg.key]);
                                 const reqId = await this.sock.requestPlaceholderResend(msg.key);
@@ -217,7 +219,6 @@ class HyperWaBot {
                         }
                     }
 
-                    // Pass to handler
                     try {
                         await this.messageHandler.handleMessages(upsert);
                     } catch (err) {
@@ -225,7 +226,6 @@ class HyperWaBot {
                     }
                 }
 
-                // Poll updates
                 if (events['messages.update']) {
                     for (const { key, update } of events['messages.update']) {
                         if (update.pollUpdates) {
@@ -257,7 +257,6 @@ class HyperWaBot {
 
                 if (events.call) {
                     logger.info('📞 Call received:', events.call);
-                    // Auto-reject calls
                     for (const { from, id } of events.call) {
                         try {
                             await this.sock.rejectCall(id, from);
@@ -274,7 +273,6 @@ class HyperWaBot {
         }
     }
 
-    // ✅ Correct getMessage using store
     async getMessage(key) {
         if (!key?.remoteJid || !key?.id) return undefined;
         try {
@@ -290,14 +288,11 @@ class HyperWaBot {
         logger.info(`✅ Connected to WhatsApp! User: ${this.sock.user?.id || 'Unknown'}`);
 
         const { jid } = this.sock.user;
-
-        // 👉 Force presence sync
         await this.sock.presenceSubscribe(jid);
         await delay(500);
         await this.sock.sendPresenceUpdate('available');
         await delay(1000);
 
-        // 👉 Sync recent messages to fix decryption
         logger.info('🔄 Fetching top chats to sync...');
         await this.sock.fetchTopChats();
 
