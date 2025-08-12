@@ -4,7 +4,6 @@ const qrcode = require('qrcode-terminal');
 const fs = require('fs-extra');
 const path = require('path');
 const NodeCache = require('node-cache');
-const readline = require('readline');
 
 const config = require('../config');
 const logger = require('./logger');
@@ -24,7 +23,6 @@ class HyperWaBot {
         this.moduleLoader = new ModuleLoader(this);
         this.qrCodeSent = false;
         this.useMongoAuth = config.get('auth.useMongoAuth', false);
-        this.usePairingCode = process.argv.includes('--use-pairing-code');
         
         // External map to store retry counts of messages when decryption/encryption fails
         // Keep this out of the socket itself, so as to prevent a message decryption/encryption loop across socket restarts
@@ -42,16 +40,6 @@ class HyperWaBot {
                 this.onDemandMap.clear();
             }
         }, 300000);
-
-        // Read line interface for pairing code
-        this.rl = readline.createInterface({ 
-            input: process.stdin, 
-            output: process.stdout 
-        });
-    }
-
-    question(text) {
-        return new Promise((resolve) => this.rl.question(text, resolve));
     }
 
     async initialize() {
@@ -142,13 +130,6 @@ class HyperWaBot {
                 // Add firewall bypass
                 firewall: false
             });
-
-            // Pairing code for Web clients
-            if (this.usePairingCode && !this.sock.authState.creds.registered) {
-                const phoneNumber = await this.question('Please enter your phone number:\n');
-                const code = await this.sock.requestPairingCode(phoneNumber);
-                logger.info(`Pairing code: ${code}`);
-            }
 
             // The process function lets you process all events that just occurred efficiently in a batch
             this.sock.ev.process(async (events) => {
@@ -341,7 +322,6 @@ class HyperWaBot {
         }
     }
 
-
     async onConnectionOpen() {
         logger.info(`✅ Connected to WhatsApp! User: ${this.sock.user?.id || 'Unknown'}`);
 
@@ -349,7 +329,6 @@ class HyperWaBot {
             config.set('bot.owner', this.sock.user.id);
             logger.info(`👑 Owner set to: ${this.sock.user.id}`);
         }
-
 
         if (this.telegramBridge) {
             try {
@@ -384,7 +363,6 @@ class HyperWaBot {
                               `• 🤖 Telegram Bridge: ${config.get('telegram.enabled') ? '✅' : '❌'}\n` +
                               `• 🔧 Custom Modules: ${config.get('features.customModules') ? '✅' : '❌'}\n` +
                               `• 🔄 Auto Replies: ${this.doReplies ? '✅' : '❌'}\n` +
-                              `• 📱 Pairing Code: ${this.usePairingCode ? '✅' : '❌'}\n` +
                               `Type *${config.get('bot.prefix')}help* for available commands!`;
 
         try {
@@ -400,12 +378,17 @@ class HyperWaBot {
         }
     }
 
-    // Implement a way to retrieve messages that were upserted from messages.upsert
+    // Fixed getMessage method - this was causing the "test" messages
     async getMessage(key) {
         try {
-            // You can implement your own message retrieval logic here
-            // For now, return a simple test message as in the example
-            return proto.Message.fromObject({ conversation: 'test' });
+            // First try to get from onDemandMap
+            if (this.onDemandMap.has(key.id)) {
+                return this.onDemandMap.get(key.id);
+            }
+            
+            // Return undefined instead of a test message
+            // This allows Baileys to handle message retrieval properly
+            return undefined;
         } catch (error) {
             logger.warn('⚠️ Error retrieving message:', error.message);
             return undefined;
@@ -430,10 +413,6 @@ class HyperWaBot {
     async shutdown() {
         logger.info('🛑 Shutting down HyperWa Userbot...');
         this.isShuttingDown = true;
-
-        if (this.rl) {
-            this.rl.close();
-        }
 
         if (this.telegramBridge) {
             try {
