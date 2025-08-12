@@ -4,6 +4,7 @@ const { exec } = require('child_process');
 const { promisify } = require('util');
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 const axios = require('axios');
+const { Sticker, StickerTypes } = require('wa-sticker-formatter');
 
 const execAsync = promisify(exec);
 
@@ -26,51 +27,7 @@ class ConverterModule {
         this.ratesLastUpdated = 0;
         this.ratesCacheTime = 3600000; // 1 hour
 
-        // Unit conversion definitions
-        this.units = {
-            length: {
-                mm: 0.001,
-                cm: 0.01,
-                m: 1,
-                km: 1000,
-                in: 0.0254,
-                ft: 0.3048,
-                yd: 0.9144,
-                mi: 1609.34
-            },
-            weight: {
-                mg: 0.000001,
-                g: 0.001,
-                kg: 1,
-                oz: 0.0283495,
-                lb: 0.453592,
-                ton: 1000
-            },
-            temperature: { // Special handling
-                c: 'c',
-                f: 'f',
-                k: 'k'
-            },
-            area: {
-                mm2: 0.000001,
-                cm2: 0.0001,
-                m2: 1,
-                km2: 1000000,
-                in2: 0.00064516,
-                ft2: 0.092903,
-                yd2: 0.836127,
-                acre: 4046.86
-            },
-            volume: {
-                ml: 0.001,
-                l: 1,
-                gal: 3.78541,
-                qt: 0.946353,
-                pt: 0.473176,
-                cup: 0.236588,
-                'fl_oz': 0.0295735
-            }
-        };
+
 
         this.commands = [
             // Media Converters
@@ -78,16 +35,15 @@ class ConverterModule {
                 name: 'sticker',
                 description: 'Convert image/video to sticker',
                 usage: '.sticker (reply to media)',
+                aliases: ['s'],
                 permissions: 'public',
-                autoWrap: false,
-                execute: this.createSticker.bind(this)
+                execute: this.createStickerAuto.bind(this)
             },
             {
                 name: 'toimg',
                 description: 'Convert sticker to image',
                 usage: '.toimg (reply to sticker)',
                 permissions: 'public',
-                autoWrap: false,
                 execute: this.stickerToImage.bind(this)
             },
             {
@@ -95,7 +51,6 @@ class ConverterModule {
                 description: 'Convert animated sticker to GIF',
                 usage: '.togif (reply to animated sticker)',
                 permissions: 'public',
-                autoWrap: false,
                 execute: this.stickerToGif.bind(this)
             },
             {
@@ -103,7 +58,6 @@ class ConverterModule {
                 description: 'Create text sticker',
                 usage: '.textsticker <text>',
                 permissions: 'public',
-                autoWrap: false,
                 execute: this.textToSticker.bind(this)
             },
             {
@@ -111,7 +65,6 @@ class ConverterModule {
                 description: 'Convert audio to WhatsApp voice note',
                 usage: '.tovn (reply to audio)',
                 permissions: 'public',
-                autoWrap: false,
                 execute: this.audioToVoiceNote.bind(this)
             },
             {
@@ -119,7 +72,6 @@ class ConverterModule {
                 description: 'Convert audio/video to MP3',
                 usage: '.tomp3 (reply to media)',
                 permissions: 'public',
-                autoWrap: false,
                 execute: this.toMp3.bind(this)
             },
             {
@@ -127,7 +79,6 @@ class ConverterModule {
                 description: 'Convert video to MP4',
                 usage: '.tomp4 (reply to video)',
                 permissions: 'public',
-                autoWrap: false,
                 execute: this.toMp4.bind(this)
             },
             {
@@ -135,7 +86,6 @@ class ConverterModule {
                 description: 'Convert video to GIF',
                 usage: '.togif2 (reply to video)',
                 permissions: 'public',
-                autoWrap: false,
                 execute: this.videoToGif.bind(this)
             },
             {
@@ -143,7 +93,6 @@ class ConverterModule {
                 description: 'Enhance video quality',
                 usage: '.enhance (reply to video)',
                 permissions: 'public',
-                autoWrap: false,
                 execute: this.enhanceVideo.bind(this)
             },
             {
@@ -151,7 +100,6 @@ class ConverterModule {
                 description: 'Remove noise from audio',
                 usage: '.denoise (reply to audio)',
                 permissions: 'public',
-                autoWrap: false,
                 execute: this.denoiseAudio.bind(this)
             },
             {
@@ -159,7 +107,6 @@ class ConverterModule {
                 description: 'Remove audio from video',
                 usage: '.mutevideo (reply to video)',
                 permissions: 'public',
-                autoWrap: false,
                 execute: this.muteVideo.bind(this)
             },
             {
@@ -167,7 +114,6 @@ class ConverterModule {
                 description: 'Compress video file',
                 usage: '.compress (reply to video)',
                 permissions: 'public',
-                autoWrap: false,
                 execute: this.compressVideo.bind(this)
             },
             
@@ -178,18 +124,7 @@ class ConverterModule {
                 usage: '.currency <amount> <from> <to>',
                 aliases: ['cur', 'exchange'],
                 permissions: 'public',
-                autoWrap: false,
                 execute: this.convertCurrency.bind(this)
-            },
-            
-            // Unified Unit Converter
-            {
-                name: 'unit',
-                description: 'Convert units (length, weight, temp, area, volume)',
-                usage: '.unit <value> <from_unit> to <to_unit>',
-                permissions: 'public',
-                autoWrap: false,
-                execute: this.convertUnit.bind(this)
             }
         ];
     }
@@ -199,50 +134,97 @@ class ConverterModule {
     }
 
     // Media Converters
-    async createSticker(msg, params, context) {
+
+async createStickerAuto(msg, params, context) {
+    try {
+        let mediaBuffer;
+        let mediaType;
+        let isTextSticker = false;
+        let stickerOptions = {
+            pack: 'HyperWa Stickers',
+            author: 'HyperWa Bot',
+            categories: ['🤖', '💬'],
+            id: `hyperwa-${Date.now()}`,
+            quality: 50,
+            type: StickerTypes.DEFAULT
+        };
+
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        
-        if (!quotedMsg?.imageMessage && !quotedMsg?.videoMessage) {
-            return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to an image or video to create a sticker.' });
+
+        // --- CASE 1: Text Sticker ---
+        if (!quotedMsg && params.length > 0) {
+            const text = params.join(' ');
+            if (text.length > 100) return;
+            mediaBuffer = await this.createTextImage(text);
+            stickerOptions.pack = 'HyperWa Text Stickers';
+            stickerOptions.categories = ['📝', '💬'];
+            isTextSticker = true;
         }
 
-        try {
-            const mediaType = quotedMsg.imageMessage ? 'image' : 'video';
-            const mediaMessage = quotedMsg[`${mediaType}Message`];
-            
-            const stream = await downloadContentFromMessage(mediaMessage, mediaType);
-            const chunks = [];
-            for await (const chunk of stream) {
-                chunks.push(chunk);
+        // --- CASE 2: Media Sticker ---
+        if (!isTextSticker) {
+            if (!quotedMsg) return;
+
+            // Video/GIF case
+            if (quotedMsg.videoMessage) {
+                const videoMessage = quotedMsg.videoMessage;
+                if (videoMessage.seconds && videoMessage.seconds > 6) return;
+                if (videoMessage.seconds && videoMessage.seconds <= 6) {
+                    stickerOptions.pack = 'HyperWa Animated';
+                    stickerOptions.categories = ['🎬', '🎭'];
+                    stickerOptions.type = StickerTypes.FULL;
+                    stickerOptions.quality = 30;
+                }
+                const stream = await downloadContentFromMessage(videoMessage, 'video');
+                const chunks = [];
+                for await (const chunk of stream) chunks.push(chunk);
+                mediaBuffer = Buffer.concat(chunks);
+                mediaType = 'video';
             }
-            const buffer = Buffer.concat(chunks);
-
-            const inputFile = path.join(this.tempDir, `input_${Date.now()}.${mediaType === 'image' ? 'jpg' : 'mp4'}`);
-            const outputFile = path.join(this.tempDir, `sticker_${Date.now()}.webp`);
-
-            await fs.writeFile(inputFile, buffer);
-
-            if (mediaType === 'image') {
-                await execAsync(`ffmpeg -i "${inputFile}" -vf "scale=512:512:force_original_aspect_ratio=increase,crop=512:512" -f webp "${outputFile}"`);
-            } else {
-                await execAsync(`ffmpeg -i "${inputFile}" -t 6 -vf "scale=512:512:force_original_aspect_ratio=increase,crop=512:512,fps=15" -f webp -loop 0 "${outputFile}"`);
+            // Image case
+            else if (quotedMsg.imageMessage) {
+                const stream = await downloadContentFromMessage(quotedMsg.imageMessage, 'image');
+                const chunks = [];
+                for await (const chunk of stream) chunks.push(chunk);
+                mediaBuffer = Buffer.concat(chunks);
+                mediaType = 'image';
             }
-
-            const stickerBuffer = await fs.readFile(outputFile);
-
-            await context.bot.sendMessage(context.sender, {
-                sticker: stickerBuffer
-            });
-
-            // Cleanup
-            await fs.remove(inputFile);
-            await fs.remove(outputFile);
-
-        } catch (error) {
-            await context.bot.sendMessage(context.sender, { text: `❌ Failed to create sticker: ${error.message}` });
         }
+
+        if (!mediaBuffer) return;
+
+        // --- CREATE & SEND STICKER ---
+        const sticker = new Sticker(mediaBuffer, stickerOptions);
+        const stickerBuffer = await sticker.toBuffer();
+        await context.bot.sendMessage(context.sender, { sticker: stickerBuffer });
+
+    } catch (error) {
+        console.error(`Sticker creation failed: ${error.message}`);
     }
+}
 
+// --- TEXT IMAGE GENERATOR ---
+async createTextImage(text) {
+    try {
+        const sharp = require('sharp');
+        
+        const svg = `
+            <svg width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+                <rect width="512" height="512" fill="#ffffff"/>
+                <text x="256" y="256" font-family="Arial, sans-serif" font-size="40"
+                      text-anchor="middle" dominant-baseline="middle" fill="#000000">
+                    ${text}
+                </text>
+            </svg>
+        `;
+        
+        return await sharp(Buffer.from(svg)).png().toBuffer();
+        
+    } catch (error) {
+        console.warn('Sharp not available, using placeholder for text sticker');
+        throw new Error('Text sticker creation requires image processing library (sharp)');
+    }
+}
     async stickerToImage(msg, params, context) {
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
         
@@ -318,32 +300,6 @@ class ConverterModule {
         }
     }
 
-    async textToSticker(msg, params, context) {
-        if (params.length === 0) {
-            return await context.bot.sendMessage(context.sender, { text: '❌ Please provide text to create a sticker.\nUsage: .textsticker <text>' });
-        }
-
-        const text = params.join(' ');
-        
-        try {
-            const outputFile = path.join(this.tempDir, `text_sticker_${Date.now()}.webp`);
-            
-            // Create text sticker using ImageMagick or similar
-            await execAsync(`convert -size 512x512 xc:white -font Arial -pointsize 48 -fill black -gravity center -annotate +0+0 "${text}" "${outputFile}"`);
-
-            const stickerBuffer = await fs.readFile(outputFile);
-
-            await context.bot.sendMessage(context.sender, {
-                sticker: stickerBuffer
-            });
-
-            // Cleanup
-            await fs.remove(outputFile);
-
-        } catch (error) {
-            await context.bot.sendMessage(context.sender, { text: `❌ Failed to create text sticker: ${error.message}` });
-        }
-    }
 
     async audioToVoiceNote(msg, params, context) {
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
@@ -711,108 +667,6 @@ class ConverterModule {
         }
     }
 
-    // Unified Unit Converter
-    async convertUnit(msg, params, context) {
-        if (params.length < 4 || params[2].toLowerCase() !== 'to') {
-            return await context.bot.sendMessage(context.sender, { text: 
-                '❌ Usage: .unit <value> <from_unit> to <to_unit>\n' +
-                'Example: .unit 10 feet to inches\n\n' +
-                'Supported categories: length (mm, cm, m, km, in, ft, yd, mi), ' +
-                'weight (mg, g, kg, oz, lb, ton), ' +
-                'temperature (c, f, k), ' +
-                'area (mm2, cm2, m2, km2, in2, ft2, yd2, acre), ' +
-                'volume (ml, l, gal, qt, pt, cup, fl_oz)'
-            });
-        }
-
-        const value = parseFloat(params[0]);
-        let fromUnit = params[1].toLowerCase();
-        let toUnit = params[3].toLowerCase();
-
-        if (isNaN(value)) {
-            return await context.bot.sendMessage(context.sender, { text: '❌ Invalid value. Please provide a valid number.' });
-        }
-
-        // Find category
-        let category = null;
-        for (const cat in this.units) {
-            if (this.units[cat][fromUnit] && this.units[cat][toUnit]) {
-                category = cat;
-                break;
-            }
-        }
-
-        if (!category) {
-            return await context.bot.sendMessage(context.sender, { text: '❌ Invalid or mismatched units. Use units from the same category.' });
-        }
-
-        let result;
-        let symbol = '';
-
-        if (category === 'temperature') {
-            let celsius;
-            switch (fromUnit) {
-                case 'c':
-                    celsius = value;
-                    break;
-                case 'f':
-                    celsius = (value - 32) * 5/9;
-                    break;
-                case 'k':
-                    celsius = value - 273.15;
-                    break;
-            }
-
-            switch (toUnit) {
-                case 'c':
-                    result = celsius;
-                    break;
-                case 'f':
-                    result = celsius * 9/5 + 32;
-                    break;
-                case 'k':
-                    result = celsius + 273.15;
-                    break;
-            }
-            result = result.toFixed(2);
-            symbol = '°';
-            fromUnit = fromUnit.toUpperCase();
-            toUnit = toUnit.toUpperCase();
-
-            await context.bot.sendMessage(context.sender, { text: 
-                `🌡️ **Temperature Conversion**\n\n${value}${symbol}${fromUnit} = ${result}${symbol}${toUnit}`
-            });
-        } else {
-            const base = value * this.units[category][fromUnit];
-            result = base / this.units[category][toUnit];
-            result = result.toFixed(6);
-
-            let emoji = '';
-            let title = '';
-            switch (category) {
-                case 'length':
-                    emoji = '📏';
-                    title = 'Length';
-                    break;
-                case 'weight':
-                    emoji = '⚖️';
-                    title = 'Weight';
-                    break;
-                case 'area':
-                    emoji = '📐';
-                    title = 'Area';
-                    break;
-                case 'volume':
-                    emoji = '🥤';
-                    title = 'Volume';
-                    break;
-            }
-
-            await context.bot.sendMessage(context.sender, { text: 
-                `${emoji} **${title} Conversion**\n\n${value} ${fromUnit} = ${result} ${toUnit}`
-            });
-        }
-    }
 }
 
 module.exports = ConverterModule;
