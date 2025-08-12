@@ -1,6 +1,6 @@
 FROM node:18-alpine
 
-# Install build dependencies for node-canvas and other native modules
+# Install build dependencies for node-canvas, ffmpeg, and other native modules
 RUN apk add --no-cache \
     git \
     python3 \
@@ -14,7 +14,8 @@ RUN apk add --no-cache \
     pango-dev \
     jpeg-dev \
     giflib-dev \
-    librsvg-dev
+    librsvg-dev \
+    ffmpeg
 
 # Set timezone
 ENV TZ=Asia/Karachi
