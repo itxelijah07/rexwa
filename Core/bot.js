@@ -77,36 +77,40 @@ class HyperWaBot {
 
         await this.moduleLoader.loadModules();
         this.store.loadFromFile();
-        await this.startSock();
+        this.store.loadFromFile();
+        logger.info('💾 Store loaded from file');
+    } catch (error) {
+        logger.warn('⚠️ Failed to load store:', error.message);
+    }
      
         logger.info('✅ HyperWa Userbot initialized successfully!');
     }
 
-    async startSock() {
-        let state, saveCreds;
+async startSock() {
+    let state, saveCreds;
 
-        // Clean up existing socket if present
-        if (this.sock) {
-            logger.info('🧹 Cleaning up existing WhatsApp socket');
-            this.sock.ev.removeAllListeners();
-            await this.sock.end();
-            this.sock = null;
-        }
+    // Clean up existing socket if present
+    if (this.sock) {
+        console.log('🧹 Cleaning up existing WhatsApp socket');
+        this.sock.ev.removeAllListeners();
+        await this.sock.end().catch(() => {});
+        this.sock = null;
+    }
 
-        // Choose auth method based on configuration
-        if (this.useMongoAuth) {
-            logger.info('🔧 Using MongoDB auth state...');
-            try {
-                ({ state, saveCreds } = await useMongoAuthState());
-            } catch (error) {
-                logger.error('❌ Failed to initialize MongoDB auth state:', error);
-                logger.info('🔄 Falling back to file-based auth...');
-                ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
-            }
-        } else {
-            logger.info('🔧 Using file-based auth state...');
+    // Choose auth method based on configuration
+    if (this.useMongoAuth) {
+        console.log('🔧 Using MongoDB auth state...');
+        try {
+            ({ state, saveCreds } = await useMongoAuthState());
+        } catch (error) {
+            console.error('❌ Failed to initialize MongoDB auth state:', error);
+            console.log('🔄 Falling back to file-based auth...');
             ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
         }
+    } else {
+        console.log('🔧 Using file-based auth state...');
+        ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
+    }
 
         // Fetch latest version of WA Web
         const { version, isLatest } = await fetchLatestBaileysVersion();
