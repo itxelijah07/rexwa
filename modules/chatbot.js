@@ -503,6 +503,103 @@ Keep responses concise but informative. Be engaging and personable.`;
         }
     }
 
+    async handleChatMessage(msg, text, bot) {
+        // Skip if it's a command
+        if (text && text.startsWith(config.get('bot.prefix'))) return;
+
+        const context = {
+            sender: msg.key.remoteJid,
+            participant: msg.key.participant || msg.key.remoteJid,
+            isGroup: msg.key.remoteJid.endsWith('@g.us'),
+            fromMe: msg.key.fromMe
+        };
+
+        // Skip own messages
+        if (context.fromMe) return;
+
+        // Check if chat is enabled for this user/group
+        if (!this.shouldRespondToChat(context)) return;
+
+        let typingStarted = false;
+
+        try {
+            // Start typing indicator and presence
+            if (bot.sock) {
+                try {
+                    await bot.sock.presenceSubscribe(context.sender);
+                    await bot.sock.sendPresenceUpdate('composing', context.sender);
+                    typingStarted = true;
+                } catch (error) {
+                    logger.debug('Failed to set typing indicator:', error.message);
+                }
+            }
+
+            // Generate response
+            const response = await this.generateChatResponse(msg, context, bot);
+            
+            if (response) {
+                // Stop typing before sending message
+                if (bot.sock && typingStarted) {
+                    try {
+                        await bot.sock.sendPresenceUpdate('paused', context.sender);
+                    } catch (error) {
+                        logger.debug('Failed to stop typing:', error.message);
+                    }
+                }
+                
+                // Send response
+                const result = await bot.sendMessage(context.sender, { text: response });
+                
+                // Handle read receipts after successful response
+                if (result && bot.sock) {
+                    try {
+                        await bot.sock.readMessages([msg.key]);
+                    } catch (error) {
+                        logger.debug('Read receipt failed (non-critical):', error.message);
+                    }
+                    
+                    // Set presence to available after response
+                    try {
+                        await bot.sock.sendPresenceUpdate('available', context.sender);
+                    } catch (error) {
+                        logger.debug('Failed to set available presence:', error.message);
+                    }
+                }
+            }
+
+        } catch (error) {
+            logger.error('ChatBot response error:', error);
+            
+            // Always stop typing on error
+            if (bot.sock && typingStarted) {
+                try {
+                    await bot.sock.sendPresenceUpdate('paused', context.sender);
+                } catch (err) {
+                    logger.debug('Failed to stop typing on error:', err.message);
+                }
+            }
+        }
+    }
+    shouldRespondToChat(context) {
+        const userId = context.participant.split('@')[0];
+
+        // Check global setting first
+        if (this.globalChatEnabled) {
+            // Check if specifically disabled for this user/group
+            if (context.isGroup) {
+                return this.groupChatSettings.get(context.sender) !== false;
+            } else {
+                return this.userChatSettings.get(userId) !== false;
+            }
+        } else {
+            // Check if specifically enabled for this user/group
+            if (context.isGroup) {
+                return this.groupChatSettings.get(context.sender) === true;
+            } else {
+                return this.userChatSettings.get(userId) === true;
+            }
+        }
+    }
 
     async generateChatResponse(msg, context, bot) {
         try {
