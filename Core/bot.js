@@ -12,7 +12,6 @@ const { connectDb } = require('../utils/db');
 const ModuleLoader = require('./module-loader');
 const { useMongoAuthState } = require('../utils/mongoAuthState');
 const { makeInMemoryStore } = require('./store'); 
-
 // External map to store retry counts of messages when decryption/encryption fails
 // Keep this out of the socket itself, so as to prevent a message decryption/encryption loop across socket restarts
 const msgRetryCounterCache = new NodeCache();
@@ -20,8 +19,8 @@ const msgRetryCounterCache = new NodeCache();
 class HyperWaBot {
     constructor() {
         this.sock = null;
-        this.store = makeInMemoryStore({ logger: logger.child({ module: 'store' }) }); // Initialize store
-        this.store.loadFromFile(); 
+        this.store = makeInMemoryStore({ logger: logger.child({ module: 'store' }) }); 
+        this.store.loadFromFile();
         this.authPath = './auth_info';
         this.messageHandler = new MessageHandler(this);
         this.telegramBridge = null;
@@ -74,39 +73,38 @@ class HyperWaBot {
                 this.telegramBridge = null;
             }
         }
-
+        await this.store.loadFromFile();
         await this.moduleLoader.loadModules();
-        this.store.loadFromFile();
-        this.store.loadFromFile();
+        await this.startSock();
 
         logger.info('✅ HyperWa Userbot initialized successfully!');
     }
 
-async startSock() {
-    let state, saveCreds;
+    async startSock() {
+        let state, saveCreds;
 
-    // Clean up existing socket if present
-    if (this.sock) {
-        console.log('🧹 Cleaning up existing WhatsApp socket');
-        this.sock.ev.removeAllListeners();
-        await this.sock.end().catch(() => {});
-        this.sock = null;
-    }
+        // Clean up existing socket if present
+        if (this.sock) {
+            logger.info('🧹 Cleaning up existing WhatsApp socket');
+            this.sock.ev.removeAllListeners();
+            await this.sock.end();
+            this.sock = null;
+        }
 
-    // Choose auth method based on configuration
-    if (this.useMongoAuth) {
-        console.log('🔧 Using MongoDB auth state...');
-        try {
-            ({ state, saveCreds } = await useMongoAuthState());
-        } catch (error) {
-            console.error('❌ Failed to initialize MongoDB auth state:', error);
-            console.log('🔄 Falling back to file-based auth...');
+        // Choose auth method based on configuration
+        if (this.useMongoAuth) {
+            logger.info('🔧 Using MongoDB auth state...');
+            try {
+                ({ state, saveCreds } = await useMongoAuthState());
+            } catch (error) {
+                logger.error('❌ Failed to initialize MongoDB auth state:', error);
+                logger.info('🔄 Falling back to file-based auth...');
+                ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
+            }
+        } else {
+            logger.info('🔧 Using file-based auth state...');
             ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
         }
-    } else {
-        console.log('🔧 Using file-based auth state...');
-        ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
-    }
 
         // Fetch latest version of WA Web
         const { version, isLatest } = await fetchLatestBaileysVersion();
