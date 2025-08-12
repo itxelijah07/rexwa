@@ -14,7 +14,7 @@ class ConverterModule {
         this.name = 'converter';
         this.metadata = {
             description: 'Advanced media and unit converter with audio/video processing',
-            version: '2.0.0',
+            version: '2.0.2',
             author: 'HyperWa Team',
             category: 'utility'
         };
@@ -27,14 +27,12 @@ class ConverterModule {
         this.ratesLastUpdated = 0;
         this.ratesCacheTime = 3600000; // 1 hour
 
-
-
         this.commands = [
             // Media Converters
             {
                 name: 'sticker',
-                description: 'Convert image/video to sticker',
-                usage: '.sticker (reply to media)',
+                description: 'Convert image/video/text to sticker',
+                usage: '.sticker (reply to media or provide text)',
                 aliases: ['s'],
                 permissions: 'public',
                 execute: this.createStickerAuto.bind(this)
@@ -52,13 +50,6 @@ class ConverterModule {
                 usage: '.togif (reply to animated sticker)',
                 permissions: 'public',
                 execute: this.stickerToGif.bind(this)
-            },
-            {
-                name: 'textsticker',
-                description: 'Create text sticker',
-                usage: '.textsticker <text>',
-                permissions: 'public',
-                execute: this.textToSticker.bind(this)
             },
             {
                 name: 'tovn',
@@ -116,7 +107,6 @@ class ConverterModule {
                 permissions: 'public',
                 execute: this.compressVideo.bind(this)
             },
-            
             // Currency Converter
             {
                 name: 'currency',
@@ -130,11 +120,20 @@ class ConverterModule {
     }
 
     async ensureTempDir() {
-        await fs.ensureDir(this.tempDir);
+        try {
+            await fs.ensureDir(this.tempDir);
+            // Verify write permissions
+            const testFile = path.join(this.tempDir, 'test.txt');
+            await fs.writeFile(testFile, 'test');
+            await fs.remove(testFile);
+        } catch (error) {
+            console.error(`Failed to ensure temp directory: ${error.message}`);
+            throw new Error('Cannot create or write to temporary directory');
+        }
     }
 
     // Media Converters
-
+ // Fixed video sticker processing method - Simple approach
 async createStickerAuto(msg, params, context) {
     try {
         let mediaBuffer;
@@ -154,7 +153,9 @@ async createStickerAuto(msg, params, context) {
         // --- CASE 1: Text Sticker ---
         if (!quotedMsg && params.length > 0) {
             const text = params.join(' ');
-            if (text.length > 100) return;
+            if (text.length > 100) {
+                return await context.bot.sendMessage(context.sender, { text: '❌ Text is too long. Please use up to 100 characters.' });
+            }
             mediaBuffer = await this.createTextImage(text);
             stickerOptions.pack = 'HyperWa Text Stickers';
             stickerOptions.categories = ['📝', '💬'];
@@ -163,68 +164,187 @@ async createStickerAuto(msg, params, context) {
 
         // --- CASE 2: Media Sticker ---
         if (!isTextSticker) {
-            if (!quotedMsg) return;
+            if (!quotedMsg) {
+                return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to an image or video to create a sticker.' });
+            }
 
             // Video/GIF case
             if (quotedMsg.videoMessage) {
                 const videoMessage = quotedMsg.videoMessage;
-                if (videoMessage.seconds && videoMessage.seconds > 6) return;
-                if (videoMessage.seconds && videoMessage.seconds <= 6) {
-                    stickerOptions.pack = 'HyperWa Animated';
-                    stickerOptions.categories = ['🎬', '🎭'];
-                    stickerOptions.type = StickerTypes.FULL;
-                    stickerOptions.quality = 30;
+                
+                // Validate video duration
+                if (videoMessage.seconds && videoMessage.seconds > 6) {
+                    return await context.bot.sendMessage(context.sender, { text: '❌ Video is too long. Please use a video of 6 seconds or less.' });
                 }
-                const stream = await downloadContentFromMessage(videoMessage, 'video');
-                const chunks = [];
-                for await (const chunk of stream) chunks.push(chunk);
-                mediaBuffer = Buffer.concat(chunks);
+
+                // Validate video file size (max 10MB)
+                if (videoMessage.fileLength && videoMessage.fileLength > 10 * 1024 * 1024) {
+                    return await context.bot.sendMessage(context.sender, { text: '❌ Video file is too large. Please use a video smaller than 10MB.' });
+                }
+
+                // Send processing message
+                await context.bot.sendMessage(context.sender, { text: '⏳ Converting video to sticker...' });
+
+                stickerOptions.pack = 'HyperWa Animated';
+                stickerOptions.categories = ['🎬', '🎭'];
+                stickerOptions.type = StickerTypes.FULL;
+                stickerOptions.quality = 30;
+
+                try {
+                    // Download video
+                    const stream = await downloadContentFromMessage(videoMessage, 'video');
+                    const chunks = [];
+                    for await (const chunk of stream) chunks.push(chunk);
+                    const videoBuffer = Buffer.concat(chunks);
+
+                    // Additional size check after download
+                    if (videoBuffer.length > 10 * 1024 * 1024) {
+                        return await context.bot.sendMessage(context.sender, { text: '❌ Video file is too large. Please use a smaller video.' });
+                    }
+
+                    // Process video: video → gif → webp sticker
+                    mediaBuffer = await this.processVideoToSticker(videoBuffer);
+
+                } catch (error) {
+                    console.error(`Video sticker processing failed: ${error.message}`);
+                    return await context.bot.sendMessage(context.sender, { text: '❌ Failed to process video sticker. Please try with a different video.' });
+                }
                 mediaType = 'video';
             }
             // Image case
             else if (quotedMsg.imageMessage) {
-                const stream = await downloadContentFromMessage(quotedMsg.imageMessage, 'image');
+                const imageMessage = quotedMsg.imageMessage;
+                
+                // Validate image file size (max 5MB)
+                if (imageMessage.fileLength && imageMessage.fileLength > 5 * 1024 * 1024) {
+                    return await context.bot.sendMessage(context.sender, { text: '❌ Image file is too large. Please use an image smaller than 5MB.' });
+                }
+
+                const stream = await downloadContentFromMessage(imageMessage, 'image');
                 const chunks = [];
                 for await (const chunk of stream) chunks.push(chunk);
                 mediaBuffer = Buffer.concat(chunks);
+
+                // Additional size check after download
+                if (mediaBuffer.length > 5 * 1024 * 1024) {
+                    return await context.bot.sendMessage(context.sender, { text: '❌ Image file is too large. Please use a smaller image.' });
+                }
+
                 mediaType = 'image';
+            } else {
+                return await context.bot.sendMessage(context.sender, { text: '❌ Please reply to a valid image or video.' });
             }
         }
 
-        if (!mediaBuffer) return;
+        if (!mediaBuffer) {
+            return await context.bot.sendMessage(context.sender, { text: '❌ No valid media or text provided for sticker creation.' });
+        }
 
         // --- CREATE & SEND STICKER ---
         const sticker = new Sticker(mediaBuffer, stickerOptions);
         const stickerBuffer = await sticker.toBuffer();
+
+        // Verify sticker buffer is valid
+        if (!stickerBuffer || stickerBuffer.length === 0) {
+            throw new Error('Generated sticker buffer is empty or invalid');
+        }
+
+        // Final size check - if still too large, reject
+        if (stickerBuffer.length > 1000000) {
+            return await context.bot.sendMessage(context.sender, { text: '❌ Generated sticker is too large. Please use a shorter video or smaller image.' });
+        }
+
         await context.bot.sendMessage(context.sender, { sticker: stickerBuffer });
 
     } catch (error) {
         console.error(`Sticker creation failed: ${error.message}`);
+        await context.bot.sendMessage(context.sender, { text: `❌ Failed to create sticker: ${error.message}` });
     }
 }
 
-// --- TEXT IMAGE GENERATOR ---
-async createTextImage(text) {
+// Simple video to sticker conversion: video → gif → webp
+async processVideoToSticker(videoBuffer) {
+    const inputFile = path.join(this.tempDir, `input_${Date.now()}.mp4`);
+    const gifFile = path.join(this.tempDir, `gif_${Date.now()}.gif`);
+    const outputFile = path.join(this.tempDir, `sticker_${Date.now()}.webp`);
+
     try {
-        const sharp = require('sharp');
-        
-        const svg = `
-            <svg width="512" height="512" xmlns="http://www.w3.org/2000/svg">
-                <rect width="512" height="512" fill="#ffffff"/>
-                <text x="256" y="256" font-family="Arial, sans-serif" font-size="40"
-                      text-anchor="middle" dominant-baseline="middle" fill="#000000">
-                    ${text}
-                </text>
-            </svg>
-        `;
-        
-        return await sharp(Buffer.from(svg)).png().toBuffer();
-        
+        // Save video to temp file
+        await fs.writeFile(inputFile, videoBuffer);
+
+        // Step 1: Convert video to GIF with timeout
+        await execAsync(
+            `ffmpeg -y -i "${inputFile}" -vf "fps=15,scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2" -an -f gif "${gifFile}"`,
+            { timeout: 20000 }
+        );
+
+        // Check if GIF was created
+        if (!await fs.pathExists(gifFile)) {
+            throw new Error('Failed to create GIF from video');
+        }
+
+        // Step 2: Convert GIF to WebP sticker with timeout  
+        await execAsync(
+            `ffmpeg -y -i "${gifFile}" -c:v libwebp -vf "fps=15,scale=512:512" -loop 0 -an -vsync 0 "${outputFile}"`,
+            { timeout: 15000 }
+        );
+
+        // Check if WebP was created
+        if (!await fs.pathExists(outputFile)) {
+            throw new Error('Failed to create WebP sticker from GIF');
+        }
+
+        // Check output file size
+        const stats = await fs.stat(outputFile);
+        if (stats.size === 0) {
+            throw new Error('Output sticker file is empty');
+        }
+
+        // If WebP is too large (>800KB), reject it
+        if (stats.size > 800000) {
+            throw new Error('Generated sticker is too large. Please use a shorter video.');
+        }
+
+        const stickerBuffer = await fs.readFile(outputFile);
+        return stickerBuffer;
+
     } catch (error) {
-        console.warn('Sharp not available, using placeholder for text sticker');
-        throw new Error('Text sticker creation requires image processing library (sharp)');
+        console.error(`Video to sticker conversion failed: ${error.message}`);
+        throw new Error(`Conversion failed: ${error.message}`);
+    } finally {
+        // Always cleanup temp files
+        try {
+            await fs.remove(inputFile).catch(() => {});
+            await fs.remove(gifFile).catch(() => {});
+            await fs.remove(outputFile).catch(() => {});
+        } catch (cleanupError) {
+            console.warn(`Cleanup failed: ${cleanupError.message}`);
+        }
     }
 }
+    // --- TEXT IMAGE GENERATOR ---
+    async createTextImage(text) {
+        try {
+            const sharp = require('sharp');
+            
+            const svg = `
+                <svg width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="512" height="512" fill="#ffffff"/>
+                    <text x="256" y="256" font-family="Arial, sans-serif" font-size="40"
+                          text-anchor="middle" dominant-baseline="middle" fill="#000000">
+                        ${text}
+                    </text>
+                </svg>
+            `;
+            
+            return await sharp(Buffer.from(svg)).png().toBuffer();
+            
+        } catch (error) {
+            console.warn('Sharp not available, using placeholder for text sticker');
+            throw new Error('Text sticker creation requires image processing library (sharp)');
+        }
+    }
+
     async stickerToImage(msg, params, context) {
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
         
@@ -299,7 +419,6 @@ async createTextImage(text) {
             await context.bot.sendMessage(context.sender, { text: `❌ Failed to convert sticker to GIF: ${error.message}` });
         }
     }
-
 
     async audioToVoiceNote(msg, params, context) {
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
@@ -666,7 +785,6 @@ async createTextImage(text) {
             throw new Error('Failed to fetch exchange rates');
         }
     }
-
 }
 
 module.exports = ConverterModule;
