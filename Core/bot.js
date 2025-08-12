@@ -12,8 +12,6 @@ const { connectDb } = require('../utils/db');
 const ModuleLoader = require('./module-loader');
 const { useMongoAuthState } = require('../utils/mongoAuthState');
 const { makeInMemoryStore } = require('./store'); 
-// External map to store retry counts of messages when decryption/encryption fails
-// Keep this out of the socket itself, so as to prevent a message decryption/encryption loop across socket restarts
 const msgRetryCounterCache = new NodeCache();
 
 class HyperWaBot {
@@ -29,8 +27,6 @@ class HyperWaBot {
         this.moduleLoader = new ModuleLoader(this);
         this.qrCodeSent = false;
         this.useMongoAuth = config.get('auth.useMongoAuth', false);
-        
-        // Simple message store for getMessage implementation (like official example)
         this.messageStore = new Map();
         
         // Simple memory cleanup
