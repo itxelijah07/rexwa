@@ -117,20 +117,14 @@ class HyperWaBot {
                     /** caching makes the store faster to send/recv messages */
                     keys: makeCacheableSignalKeyStore(state.keys, logger.child({ module: 'signal-keys' })),
                 },
-                msgRetryCounterCache, // Use the external cache like official example
+                msgRetryCounterCache, 
                 generateHighQualityLinkPreview: true,
-                // ignore all broadcast messages -- to receive the same
-                // comment the line below out
-                // shouldIgnoreJid: jid => isJidBroadcast(jid),
-                // implement to handle retries & poll updates
                 getMessage: this.getMessage.bind(this),
                 browser: ['HyperWa', 'Chrome', '3.0'],
             });
 
             // The process function lets you process all events that just occurred efficiently in a batch
             this.sock.ev.process(async (events) => {
-                // Something about the connection changed
-                // maybe it closed, or we received all offline message or connection opened
                 if (events['connection.update']) {
                     const update = events['connection.update'];
                     const { connection, lastDisconnect, qr } = update;
@@ -305,7 +299,7 @@ class HyperWaBot {
         }
     }
 
-    // Simple getMessage implementation like official example
+    // Simple getMessage
     async getMessage(key) {
         try {
             // Check if we have the message stored
@@ -360,12 +354,7 @@ class HyperWaBot {
         
         const startupMessage = `🚀 *${config.get('bot.name')} v${config.get('bot.version')}* is now online!\n\n` +
                               `🔥 *HyperWa Features Active:*\n` +
-                              `• 📱 Official Baileys Message Handling\n` +
-                              `• 🛡️ Proper Decryption Support\n` +
-                              `• 🗄️ Message Store: ✅\n` +
-                              `• 🔐 Auth Method: ${authMethod}\n` +
                               `• 🤖 Telegram Bridge: ${config.get('telegram.enabled') ? '✅' : '❌'}\n` +
-                              `• 🔧 Custom Modules: ${config.get('features.customModules') ? '✅' : '❌'}\n` +
                               `• 🔄 Auto Replies: ${this.doReplies ? '✅' : '❌'}\n` +
                               `Type *${config.get('bot.prefix')}help* for available commands!`;
 
