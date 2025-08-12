@@ -1,4 +1,3 @@
-// mongoAuthState.js - Enhanced version
 const { useMultiFileAuthState } = require("@whiskeysockets/baileys");
 const fs = require("fs-extra");
 const path = require("path");
@@ -74,7 +73,7 @@ async function useMongoAuthState() {
         );
 
         await fs.remove(AUTH_TAR).catch(() => {});
-        console.log("💾 Session and store saved to MongoDB.");
+      //  console.log("💾 Session and store saved to MongoDB.");
     }
 
     return { state, saveCreds };
