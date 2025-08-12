@@ -7,7 +7,7 @@ const {
     getAggregateVotesInPollMessage,
     isJidNewsletter,
     delay,
-    proto,
+    proto
 } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const qrcode = require('qrcode-terminal');
