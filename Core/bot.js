@@ -78,11 +78,7 @@ class HyperWaBot {
         await this.moduleLoader.loadModules();
         this.store.loadFromFile();
         this.store.loadFromFile();
-        logger.info('💾 Store loaded from file');
-    } catch (error) {
-        logger.warn('⚠️ Failed to load store:', error.message);
-    }
-     
+
         logger.info('✅ HyperWa Userbot initialized successfully!');
     }
 
