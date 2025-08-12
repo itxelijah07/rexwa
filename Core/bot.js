@@ -121,6 +121,11 @@ class HyperWaBot {
                 generateHighQualityLinkPreview: true,
                 getMessage: this.getMessage.bind(this),
                 browser: ['HyperWa', 'Chrome', '3.0'],
+                // Enable message history for better message retrieval
+                syncFullHistory: false,
+                markOnlineOnConnect: true,
+                // Add firewall bypass
+                firewall: false
             });
 
             // The process function lets you process all events that just occurred efficiently in a batch
