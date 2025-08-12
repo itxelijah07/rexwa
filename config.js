@@ -26,8 +26,6 @@ class Config {
                 customModules: true,              // Enable custom modules
                 rateLimiting: true,                // Disable rate limiting for better performance
                 autoReply: false,                  // Auto reply to messages
-                typingIndicators: true,            // Show typing indicators
-                autoReadMessages: true,            // Auto read messages
                 autoViewStatus: false,             // Auto view status updates
                 telegramBridge: true,              // Sync with Telegram
                 respondToUnknownCommands: false,   // Respond to unknown commands
