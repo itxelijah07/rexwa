@@ -9,7 +9,6 @@ const {
     delay,
     proto,
     makeInMemoryStore,
-    useMongoAuthState as useMongoAuthStateOriginal
 } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const qrcode = require('qrcode-terminal');
@@ -22,7 +21,7 @@ const MessageHandler = require('./message-handler');
 const { connectDb } = require('../utils/db');
 const ModuleLoader = require('./module-loader');
 const { useMongoAuthState } = require('../utils/mongoAuthState');
-
+const storePath = './auth_info/baileys-store.json';
 // External retry cache (critical)
 const msgRetryCounterCache = new NodeCache();
 
