@@ -8,7 +8,6 @@ const {
     isJidNewsletter,
     delay,
     proto,
-    makeInMemoryStore
 } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const qrcode = require('qrcode-terminal');
