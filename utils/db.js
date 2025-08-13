@@ -1,28 +1,44 @@
 // utils/db.js
-const config = require('../config');
 const { MongoClient } = require('mongodb');
+const config = require('../config');
+const logger = require('../core/logger');
 
-let client; // Keep one instance across imports
+let client;
+let db;
 
 async function connectDb() {
-    if (!client) {
-        const uri = config.get('mongo.uri');
-        const dbName = config.get('mongo.dbName');
+    if (db) return db;
 
-        if (!uri || !dbName) {
-            throw new Error('❌ MongoDB URI or DB name is missing from config');
-        }
+    // Try to get URI from config or environment
+    const uri = config.get('mongo.uri') || process.env.MONGO_URI;
+    if (!uri) {
+        throw new Error('MongoDB URI is not set in config or environment');
+    }
 
+    const dbName = config.get('mongo.dbName') || process.env.MONGO_DB || 'hyperwa';
+
+    try {
         client = new MongoClient(uri, {
             useNewUrlParser: true,
             useUnifiedTopology: true
         });
-
         await client.connect();
-        console.log('✅ MongoDB connected');
+        db = client.db(dbName);
+        logger.info(`✅ Connected to MongoDB database: ${dbName}`);
+        return db;
+    } catch (err) {
+        logger.error('❌ MongoDB connection error:', err.message);
+        throw err;
     }
-
-    return client.db(config.get('mongo.dbName'));
 }
 
-module.exports = { connectDb };
+async function closeDb() {
+    if (client) {
+        await client.close();
+        logger.info('🔌 MongoDB connection closed');
+        client = null;
+        db = null;
+    }
+}
+
+module.exports = { connectDb, closeDb };
