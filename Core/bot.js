@@ -1,6 +1,10 @@
-const { default: makeWASocket, DisconnectReason, fetchLatestBaileysVersion, getAggregateVotesInPollMessage, delay, proto } = require('@whiskeysockets/baileys');
+fix
+
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, getAggregateVotesInPollMessage, isJidNewsletter, delay, proto } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const qrcode = require('qrcode-terminal');
+const fs = require('fs-extra');
+const path = require('path');
 const NodeCache = require('node-cache');
 
 const config = require('../config');
@@ -10,7 +14,6 @@ const { connectDb } = require('../utils/db');
 const ModuleLoader = require('./module-loader');
 const { useMongoAuthState } = require('../utils/mongoAuthState');
 const { makeInMemoryStore } = require('./store');
-
 const msgRetryCounterCache = new NodeCache();
 
 class HyperWaBot {
@@ -18,17 +21,19 @@ class HyperWaBot {
         this.sock = null;
         this.store = makeInMemoryStore({ logger: logger.child({ module: 'store' }) });
         this.store.loadFromFile();
+        this.authPath = './auth_info';
         this.messageHandler = new MessageHandler(this);
         this.telegramBridge = null;
         this.isShuttingDown = false;
         this.db = null;
         this.moduleLoader = new ModuleLoader(this);
+        this.qrCodeSent = false;
         this.useMongoAuth = config.get('auth.useMongoAuth', false);
         this.messageStore = new Map();
 
         // Reconnection backoff
-        this.reconnectInterval = 1000;
-        this.maxReconnectInterval = 30000;
+        this.reconnectInterval = 1000; // Start with 1s
+        this.maxReconnectInterval = 30000; // Max 30s
 
         // Memory cleanup: keep messages < 10 mins old
         setInterval(() => {
@@ -36,7 +41,7 @@ class HyperWaBot {
             let cleaned = 0;
             for (const [id, message] of this.messageStore) {
                 const msgTime = (message.messageTimestamp || 0) * 1000;
-                if (now - msgTime > 10 * 60 * 1000) {
+                if (now - msgTime > 10 * 60 * 1000) { // 10 minutes
                     this.messageStore.delete(id);
                     cleaned++;
                 }
@@ -44,7 +49,7 @@ class HyperWaBot {
             if (cleaned > 0) {
                 logger.debug(`🧹 Message store cleaned: ${cleaned} old messages removed`);
             }
-        }, 300000);
+        }, 300000); // Every 5 minutes
     }
 
     async initialize() {
@@ -84,7 +89,7 @@ class HyperWaBot {
     }
 
     async startSock() {
-        let { state, saveCreds, clear: clearSession } = { state: null, saveCreds: null, clear: null };
+        let state, saveCreds;
 
         // Clean up existing socket
         if (this.sock) {
@@ -94,28 +99,45 @@ class HyperWaBot {
             this.sock = null;
         }
 
-        try {
-            if (this.useMongoAuth) {
-                logger.info('🔧 Using MongoDB-only auth state ');
-                ({ state, saveCreds, clear } = await useMongoAuthState());
-            } else {
-                logger.info('🔧 Using file-based auth state');
-                const { state: fileState, saveCreds: fileSaveCreds } = await require('@whiskeysockets/baileys').useMultiFileAuthState('./auth_info');
-                state = fileState;
-                saveCreds = fileSaveCreds;
-                clear = async () => {
-                    const fs = require('fs-extra');
-                    await fs.remove('./auth_info');
-                };
+        // Choose auth method
+        if (this.useMongoAuth) {
+            logger.info('🔧 Using MongoDB auth state...');
+            try {
+                ({ state, saveCreds } = await useMongoAuthState());
+            } catch (error) {
+                logger.error('❌ Failed to initialize MongoDB auth state:', error);
+                logger.info('🔄 Falling back to file-based auth...');
+                ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
             }
+        } else {
+            logger.info('🔧 Using file-based auth state...');
+            ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
+        }
 
-            const { version, isLatest } = await fetchLatestBaileysVersion();
-            logger.info(`📱 Using WA v${version.join('.')}, isLatest: ${isLatest}`);
+        // Wait for files to settle (critical for keys/)
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
+        // Verify keys directory exists
+        const keysDir = path.join(this.authPath, 'keys');
+        if (await fs.pathExists(keysDir)) {
+            const keyFiles = (await fs.readdir(keysDir)).length;
+            logger.debug(`🔑 Session keys loaded: ${keyFiles} sessions`);
+        } else {
+            logger.warn('⚠️ keys/ directory missing! Session will be unstable until new messages are received.');
+        }
+
+        // Fetch latest WA version
+        const { version, isLatest } = await fetchLatestBaileysVersion();
+        logger.info(`📱 Using WA v${version.join('.')}, isLatest: ${isLatest}`);
+
+        try {
             this.sock = makeWASocket({
                 version,
                 logger: logger.child({ module: 'baileys' }),
-                auth: state,
+                auth: {
+                    creds: state.creds,
+                    keys: makeCacheableSignalKeyStore(state.keys, logger.child({ module: 'signal-keys' })),
+                },
                 msgRetryCounterCache,
                 generateHighQualityLinkPreview: true,
                 getMessage: this.getMessage.bind(this),
@@ -149,18 +171,28 @@ class HyperWaBot {
 
                     if (connection === 'close') {
                         const statusCode = (lastDisconnect?.error)?.output?.statusCode;
-                        if (statusCode === DisconnectReason.loggedOut) {
-                            logger.error('❌ Logged out from WhatsApp. Clearing session...');
-                            if (clearSession) await clearSession();
-                            process.exit(1);
-                        } else {
+                        if (statusCode !== DisconnectReason.loggedOut) {
                             if (!this.isShuttingDown) {
                                 logger.warn(`🔄 Connection closed. Reconnecting in ${this.reconnectInterval}ms...`);
                                 setTimeout(() => this.startSock(), this.reconnectInterval);
                                 this.reconnectInterval = Math.min(this.reconnectInterval * 2, this.maxReconnectInterval);
                             }
+                        } else {
+                            logger.error('❌ Connection closed permanently. Clearing session...');
+                            if (this.useMongoAuth) {
+                                try {
+                                    const db = await connectDb();
+                                    const coll = db.collection("auth");
+                                    await coll.deleteOne({ _id: "session" });
+                                    logger.info('🗑️ MongoDB auth session cleared');
+                                } catch (error) {
+                                    logger.error('❌ Failed to clear MongoDB auth session:', error);
+                                }
+                            }
+                            process.exit(1);
                         }
                     } else if (connection === 'open') {
+                        // ✅ Reset reconnect interval
                         this.reconnectInterval = 1000;
                         await this.onConnectionOpen();
                     }
@@ -234,7 +266,7 @@ class HyperWaBot {
                         if (update.pollUpdates) {
                             const pollCreation = this.messageStore.get(key.id);
                             if (pollCreation) {
-                                logger.info('📊 Poll update received, aggregation:',
+                                logger.info('📊 Poll update received, aggregation:', 
                                     getAggregateVotesInPollMessage({
                                         message: { message: pollCreation },
                                         pollUpdates: update.pollUpdates,
@@ -284,6 +316,7 @@ class HyperWaBot {
         }
     }
 
+    // Reliable getMessage for decryption retries
     async getMessage(key) {
         try {
             if (key.id && this.messageStore.has(key.id)) {
@@ -293,7 +326,7 @@ class HyperWaBot {
             if (this.store) {
                 const msg = await Promise.race([
                     this.store.loadMessage(key.remoteJid, key.id),
-                    new Promise(resolve => setTimeout(resolve, 2000))
+                    new Promise(resolve => setTimeout(resolve, 2000)) // 2s timeout
                 ]);
                 return msg?.message;
             }
@@ -307,6 +340,7 @@ class HyperWaBot {
 
     async onConnectionOpen() {
         logger.info(`✅ Connected to WhatsApp! User: ${this.sock.user?.id || 'Unknown'}`);
+
 
         if (!config.get('bot.owner') && this.sock.user) {
             config.set('bot.owner', this.sock.user.id);
@@ -386,6 +420,7 @@ class HyperWaBot {
         if (this.sock) {
             await this.sock.end();
         }
+
 
         logger.info('✅ HyperWa Userbot shutdown complete');
     }
