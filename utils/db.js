@@ -1,9 +1,9 @@
 const config = require('../config');
 const { MongoClient } = require('mongodb');
 
-const MONGO_URI = config.('mongo.uri');
-const DB_NAME = config.('mongo.dbName');
-const OPTIONS = config.('mongo.options');
+const MONGO_URI = config.mongo.uri;
+const DB_NAME = config.mongo.dbName;
+const OPTIONS = config.mongo.options;
 
 const client = new MongoClient(MONGO_URI, OPTIONS);
 
