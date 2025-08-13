@@ -11,21 +11,22 @@ class MongoConfig {
 
     async init() {
         if (this.initialized) return;
-        
+
         try {
             this.db = await connectDb();
             this.collection = this.db.collection('bot_settings');
-            
+
             // Create indexes for better performance
             await this.collection.createIndex({ key: 1 }, { unique: true });
-            
+
             // Load all settings into cache
             await this.loadAllSettings();
-            
+
             this.initialized = true;
             logger.info('✅ MongoDB config initialized');
         } catch (error) {
-            logger.error('❌ Failed to initialize MongoDB config:', error);
+            logger.error(`❌ Failed to initialize MongoDB config: ${error.message}`);
+            logger.error(error.stack);
             throw error;
         }
     }
@@ -38,7 +39,8 @@ class MongoConfig {
             }
             logger.info(`📥 Loaded ${settings.length} settings from MongoDB`);
         } catch (error) {
-            logger.error('❌ Failed to load settings from MongoDB:', error);
+            logger.error(`❌ Failed to load settings from MongoDB: ${error.message}`);
+            logger.error(error.stack);
         }
     }
 
@@ -50,12 +52,11 @@ class MongoConfig {
 
         const keys = key.split('.');
         let value = this.cache.get(keys[0]);
-        
+
         if (value === undefined) {
             return defaultValue;
         }
 
-        // Navigate nested object
         for (let i = 1; i < keys.length; i++) {
             if (value && typeof value === 'object' && keys[i] in value) {
                 value = value[keys[i]];
@@ -74,9 +75,8 @@ class MongoConfig {
 
         const keys = key.split('.');
         const rootKey = keys[0];
-        
+
         if (keys.length === 1) {
-            // Simple key-value
             this.cache.set(rootKey, value);
             await this.collection.updateOne(
                 { key: rootKey },
@@ -84,21 +84,18 @@ class MongoConfig {
                 { upsert: true }
             );
         } else {
-            // Nested key
             let rootValue = this.cache.get(rootKey) || {};
             let current = rootValue;
-            
-            // Navigate to parent of target key
+
             for (let i = 1; i < keys.length - 1; i++) {
                 if (!current[keys[i]] || typeof current[keys[i]] !== 'object') {
                     current[keys[i]] = {};
                 }
                 current = current[keys[i]];
             }
-            
-            // Set the final value
+
             current[keys[keys.length - 1]] = value;
-            
+
             this.cache.set(rootKey, rootValue);
             await this.collection.updateOne(
                 { key: rootKey },
@@ -135,18 +132,17 @@ class MongoConfig {
             let rootValue = this.cache.get(rootKey);
             if (rootValue && typeof rootValue === 'object') {
                 let current = rootValue;
-                
-                // Navigate to parent
+
                 for (let i = 1; i < keys.length - 1; i++) {
                     if (current[keys[i]]) {
                         current = current[keys[i]];
                     } else {
-                        return; // Path doesn't exist
+                        return;
                     }
                 }
-                
+
                 delete current[keys[keys.length - 1]];
-                
+
                 this.cache.set(rootKey, rootValue);
                 await this.collection.updateOne(
                     { key: rootKey },
@@ -168,7 +164,6 @@ class MongoConfig {
         logger.info('🧹 All settings cleared from MongoDB');
     }
 
-    // Get all settings as plain object
     getAll() {
         const result = {};
         for (const [key, value] of this.cache) {
