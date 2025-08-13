@@ -61,7 +61,7 @@ class StatusViewerModule {
         }
 
         this.autoViewStatus = action === 'on';
-        config.set('features.autoViewStatus', this.autoViewStatus);
+        await config.set('features.autoViewStatus', this.autoViewStatus);
         
         return ` *Auto status viewing* ${this.autoViewStatus ? 'enabled' : 'disabled'}`;
     }
@@ -77,13 +77,13 @@ class StatusViewerModule {
         // Toggle on/off
         if (['on', 'off'].includes(param)) {
             this.autoReactStatus = param === 'on';
-            config.set('features.autoReactStatus', this.autoReactStatus);
+            await config.set('features.autoReactStatus', this.autoReactStatus);
             return ` *Auto status reactions* ${this.autoReactStatus ? 'enabled' : 'disabled'}`;
         }
 
         // Set emoji
         this.statusReaction = params[0];
-        config.set('features.statusReaction', this.statusReaction);
+        await config.set('features.statusReaction', this.statusReaction);
         return ` *Status reaction set to*: ${this.statusReaction}`;
     }
 

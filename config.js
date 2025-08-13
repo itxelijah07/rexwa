@@ -1,5 +1,9 @@
+const MongoConfig = require('./utils/mongoConfig');
+
 class Config {
     constructor() {
+        this.useMongoConfig = false;
+        this.mongoConfig = null;
         this.defaultConfig = {
             bot: {
                 name: 'HyperWa',
@@ -12,6 +16,7 @@ class Config {
 
             auth: {
                 useMongoAuth: true, // Set to false for file-based auth
+                useMongoConfig: true, // Set to false for file-based config
                 clearAuthOnStart: false
             },
 
@@ -88,6 +93,7 @@ class Config {
             
             // Store configuration for enhanced features
             store: {
+                useMongoStore: true, // Set to false for file-based store
                 filePath: './whatsapp-store.json',
                 autoSaveInterval: 30000           // Save every 30 seconds
             },
@@ -111,16 +117,42 @@ class Config {
         this.load();
     }
 
-    load() {
+    async load() {
         this.config = { ...this.defaultConfig };
-        console.log('✅ Configuration loaded');
+        
+        // Initialize MongoDB config if enabled
+        if (this.config.auth.useMongoConfig) {
+            try {
+                this.mongoConfig = new MongoConfig();
+                await this.mongoConfig.init();
+                this.useMongoConfig = true;
+                console.log('✅ MongoDB configuration loaded');
+            } catch (error) {
+                console.error('❌ Failed to load MongoDB config, falling back to default:', error.message);
+                this.useMongoConfig = false;
+            }
+        } else {
+            console.log('✅ Default configuration loaded');
+        }
     }
 
     get(key) {
+        if (this.useMongoConfig && this.mongoConfig) {
+            const value = this.mongoConfig.get(key);
+            if (value !== undefined) {
+                return value;
+            }
+        }
+        
         return key.split('.').reduce((o, k) => o && o[k], this.config);
     }
 
-    set(key, value) {
+    async set(key, value) {
+        if (this.useMongoConfig && this.mongoConfig) {
+            await this.mongoConfig.set(key, value);
+            return;
+        }
+        
         const keys = key.split('.');
         const lastKey = keys.pop();
         const target = keys.reduce((o, k) => {
@@ -131,10 +163,49 @@ class Config {
         console.warn(`⚠️ Config key '${key}' was set to '${value}' (in-memory only).`);
     }
 
-    update(updates) {
+    async update(updates) {
+        if (this.useMongoConfig && this.mongoConfig) {
+            await this.mongoConfig.update(updates);
+            return;
+        }
+        
         this.config = { ...this.config, ...updates };
         console.warn('⚠️ Config was updated in memory. Not persistent.');
     }
+
+    async delete(key) {
+        if (this.useMongoConfig && this.mongoConfig) {
+            await this.mongoConfig.delete(key);
+            return;
+        }
+        
+        const keys = key.split('.');
+        const lastKey = keys.pop();
+        const target = keys.reduce((o, k) => o && o[k], this.config);
+        if (target) {
+            delete target[lastKey];
+        }
+    }
+
+    async clear() {
+        if (this.useMongoConfig && this.mongoConfig) {
+            await this.mongoConfig.clear();
+            return;
+        }
+        
+        this.config = { ...this.defaultConfig };
+    }
+
+    getAll() {
+        if (this.useMongoConfig && this.mongoConfig) {
+            return { ...this.defaultConfig, ...this.mongoConfig.getAll() };
+        }
+        
+        return this.config;
+    }
 }
 
-module.exports = new Config();
+const configInstance = new Config();
+
+// Export a promise that resolves when config is loaded
+module.exports = configInstance;

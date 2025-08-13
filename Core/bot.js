@@ -14,6 +14,7 @@ const { connectDb } = require('../utils/db');
 const ModuleLoader = require('./module-loader');
 const { useMongoAuthState } = require('../utils/mongoAuthState');
 const { makeInMemoryStore } = require('./store');
+const { makeMongoStore } = require('../utils/mongoStore');
 const msgRetryCounterCache = new NodeCache();
 
 class HyperWaBot {
@@ -29,6 +30,7 @@ class HyperWaBot {
         this.moduleLoader = new ModuleLoader(this);
         this.qrCodeSent = false;
         this.useMongoAuth = config.get('auth.useMongoAuth', false);
+        this.useMongoStore = config.get('store.useMongoStore', false);
         this.messageStore = new Map();
 
         // Reconnection backoff
@@ -54,6 +56,11 @@ class HyperWaBot {
 
     async initialize() {
         logger.info('🔧 Initializing HyperWa Userbot...');
+
+        // Initialize config first (MongoDB config if enabled)
+        if (typeof config.load === 'function') {
+            await config.load();
+        }
 
         try {
             this.db = await connectDb();
@@ -81,7 +88,25 @@ class HyperWaBot {
             }
         }
 
-        await this.store.loadFromFile();
+        // Initialize store based on configuration
+        if (this.useMongoStore) {
+            logger.info('🔧 Using MongoDB store...');
+            this.store = makeMongoStore({
+                cacheSize: config.get('store.cacheSize', 1000),
+                autoSave: config.get('store.autoSave', true),
+                saveInterval: config.get('store.autoSaveInterval', 30000)
+            });
+            await this.store.init();
+        } else {
+            logger.info('🔧 Using file-based store...');
+            this.store = makeInMemoryStore({
+                logger: logger.child({ module: 'store' }),
+                filePath: config.get('store.filePath', './whatsapp-store.json'),
+                autoSaveInterval: config.get('store.autoSaveInterval', 30000)
+            });
+            await this.store.loadFromFile();
+        }
+
         await this.moduleLoader.loadModules();
         await this.startSock();
 
@@ -106,8 +131,7 @@ class HyperWaBot {
                 ({ state, saveCreds } = await useMongoAuthState());
             } catch (error) {
                 logger.error('❌ Failed to initialize MongoDB auth state:', error);
-                logger.info('🔄 Falling back to file-based auth...');
-                ({ state, saveCreds } = await useMultiFileAuthState(this.authPath));
+                throw error; // Don't fallback, let it fail if MongoDB is configured
             }
         } else {
             logger.info('🔧 Using file-based auth state...');
@@ -415,6 +439,11 @@ class HyperWaBot {
             } catch (err) {
                 logger.warn('⚠️ Telegram shutdown error:', err.message);
             }
+        }
+
+        // Cleanup store
+        if (this.store && typeof this.store.cleanup === 'function') {
+            await this.store.cleanup();
         }
 
         if (this.sock) {

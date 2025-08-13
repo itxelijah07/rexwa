@@ -8,8 +8,17 @@ global.crypto = require('crypto');
 async function main() {
     try {
         logger.info('🚀 Starting HyperWa Userbot...');
+        
+        // Load configuration first
+        if (typeof config.load === 'function') {
+            await config.load();
+        }
+        
         logger.info(`🎯 Version: ${config.get('bot.version')}`);
         logger.info(`🏢 Company: ${config.get('bot.company')}`);
+        logger.info(`🔧 MongoDB Auth: ${config.get('auth.useMongoAuth') ? '✅' : '❌'}`);
+        logger.info(`🔧 MongoDB Store: ${config.get('store.useMongoStore') ? '✅' : '❌'}`);
+        logger.info(`🔧 MongoDB Config: ${config.get('auth.useMongoConfig') ? '✅' : '❌'}`);
 
         const bot = new HyperWaBot();
         await bot.initialize();

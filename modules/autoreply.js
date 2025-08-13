@@ -57,13 +57,13 @@ class AutoReplyModule {
         // Toggle on/off
         if (['on', 'off'].includes(param)) {
             this.autoReply = param === 'on';
-            config.set('features.autoReply', this.autoReply);
+            await config.set('features.autoReply', this.autoReply);
             return ` *Auto reply* ${this.autoReply ? 'enabled' : 'disabled'}`;
         }
 
         // Set message
         this.autoReplyText = params.join(' ');
-        config.set('messages.autoReplyText', this.autoReplyText);
+        await config.set('messages.autoReplyText', this.autoReplyText);
         return ` *Auto reply message set to*:\n"${this.autoReplyText}"`;
     }
 

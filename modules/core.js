@@ -78,6 +78,17 @@ class CoreModule {
                 execute: this.toggleMode.bind(this)
             },
             {
+                name: 'config',
+                description: 'View or update configuration',
+                usage: '.config [get|set|delete] [key] [value]',
+                permissions: 'owner',
+                ui: {
+                    processingText: '⚙️ Managing configuration...',
+                    errorText: '❌ Configuration operation failed'
+                },
+                execute: this.manageConfig.bind(this)
+            },
+            {
                 name: 'ban',
                 description: 'Ban a user',
                 usage: '.ban <number>',
@@ -182,7 +193,7 @@ async restart(msg, params, context) {
             return `🌐 Current Mode: ${config.get('features.mode')}\n\nUsage: \`.mode public|private\``;
         }
 
-        config.set('features.mode', mode);
+        await config.set('features.mode', mode);
         this.incrementCommandCount('mode');
         if (this.bot.telegramBridge) {
             await this.bot.telegramBridge.logToTelegram('🌐 Mode Changed', `New mode: ${mode}`);
@@ -190,6 +201,56 @@ async restart(msg, params, context) {
         return `✅ *Mode Changed*\n\nNew Mode: ${mode}`;
     }
 
+    async manageConfig(msg, params, context) {
+        if (params.length === 0) {
+            const allConfig = config.getAll();
+            const configKeys = Object.keys(allConfig).slice(0, 20); // Show first 20 keys
+            return `⚙️ *Configuration Management*\n\n` +
+                   `📋 Available keys (showing first 20):\n${configKeys.map(k => `• ${k}`).join('\n')}\n\n` +
+                   `💡 Usage:\n` +
+                   `• \`.config get <key>\` - Get value\n` +
+                   `• \`.config set <key> <value>\` - Set value\n` +
+                   `• \`.config delete <key>\` - Delete key`;
+        }
+
+        const action = params[0]?.toLowerCase();
+        const key = params[1];
+
+        switch (action) {
+            case 'get':
+                if (!key) return '❌ Usage: `.config get <key>`';
+                const value = config.get(key);
+                return `⚙️ *Configuration Value*\n\n` +
+                       `🔑 Key: \`${key}\`\n` +
+                       `💎 Value: \`${JSON.stringify(value, null, 2)}\``;
+
+            case 'set':
+                if (params.length < 3) return '❌ Usage: `.config set <key> <value>`';
+                const newValue = params.slice(2).join(' ');
+                
+                // Try to parse as JSON, fallback to string
+                let parsedValue;
+                try {
+                    parsedValue = JSON.parse(newValue);
+                } catch {
+                    parsedValue = newValue;
+                }
+                
+                await config.set(key, parsedValue);
+                return `✅ *Configuration Updated*\n\n` +
+                       `🔑 Key: \`${key}\`\n` +
+                       `💎 New Value: \`${JSON.stringify(parsedValue, null, 2)}\``;
+
+            case 'delete':
+                if (!key) return '❌ Usage: `.config delete <key>`';
+                await config.delete(key);
+                return `🗑️ *Configuration Deleted*\n\n` +
+                       `🔑 Key: \`${key}\``;
+
+            default:
+                return '❌ Invalid action. Use: get, set, or delete';
+        }
+    }
     async banUser(msg, params, context) {
         const phone = (params[0] || '').replace('+', '');
         if (!phone) return '❌ Usage: `.ban <number>`';
@@ -197,7 +258,7 @@ async restart(msg, params, context) {
         if (list.includes(phone)) return `❌ User ${phone} is already banned.`;
 
         list.push(phone);
-        config.set('security.blockedUsers', list);
+        await config.set('security.blockedUsers', list);
         this.incrementCommandCount('ban');
 
         if (this.bot.telegramBridge) {
@@ -212,7 +273,7 @@ async restart(msg, params, context) {
         const list = config.get('security.blockedUsers') || [];
         if (!list.includes(phone)) return `❌ User ${phone} is not banned.`;
 
-        config.set('security.blockedUsers', list.filter(p => p !== phone));
+        await config.set('security.blockedUsers', list.filter(p => p !== phone));
         this.incrementCommandCount('unban');
 
         if (this.bot.telegramBridge) {
