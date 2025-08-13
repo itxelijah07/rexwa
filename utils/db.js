@@ -2,27 +2,27 @@
 const config = require('../config');
 const { MongoClient } = require('mongodb');
 
-const MONGO_URI = config.mongo?.uri || process.env.MONGO_URI;
-const DB_NAME = config.mongo?.dbName || process.env.MONGO_DB_NAME || 'hyperwa';
-const OPTIONS = config.mongo?.options || {};
-
-if (!MONGO_URI) {
-    console.error('❌ MongoDB URI is missing! Set it in config.js or MONGO_URI env variable.');
-    process.exit(1);
-}
-
-const client = new MongoClient(MONGO_URI, OPTIONS);
+let client; // Keep one instance across imports
 
 async function connectDb() {
-    try {
-        if (!client.topology?.isConnected()) {
-            await client.connect();
+    if (!client) {
+        const uri = config.get('mongo.uri');
+        const dbName = config.get('mongo.dbName');
+
+        if (!uri || !dbName) {
+            throw new Error('❌ MongoDB URI or DB name is missing from config');
         }
-        return client.db(DB_NAME);
-    } catch (err) {
-        console.error('❌ Failed to connect to MongoDB:', err);
-        throw err;
+
+        client = new MongoClient(uri, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true
+        });
+
+        await client.connect();
+        console.log('✅ MongoDB connected');
     }
+
+    return client.db(config.get('mongo.dbName'));
 }
 
 module.exports = { connectDb };
