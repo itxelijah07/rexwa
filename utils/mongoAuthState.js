@@ -1,7 +1,7 @@
 // utils/mongoAuthState.js
 const { initAuthCreds } = require('@whiskeysockets/baileys');
 const { connectDb } = require('./db');
-const logger = require('../bot/logger');
+const logger = require('../Core/logger');
 
 /**
  * Fully MongoDB-backed authentication state for Baileys
