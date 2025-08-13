@@ -1,161 +1,91 @@
-// utils/mongoAuthState.js
-const { initAuthCreds } = require('@whiskeysockets/baileys');
-const { connectDb } = require('./db');
-const logger = require('../Core/logger');
+const { useMultiFileAuthState } = require("@whiskeysockets/baileys");
+const fs = require("fs-extra");
+const path = require("path");
+const tar = require("tar");
+const { connectDb } = require("./db");
 
-/**
- * Fully MongoDB-backed authentication state for Baileys
- * - No file system usage (no auth_info/, no creds.json, no keys/)
- * - Stores session in a single document in the 'session' collection
- * - Automatically clears corrupted or logged-out sessions
- * - Never expires unless manually deleted
- */
+const AUTH_DIR = "./auth_info";
+const AUTH_TAR = "auth_backup.tar";
+const KEYS_DIR = path.join(AUTH_DIR, "keys");
+const CREDS_PATH = path.join(AUTH_DIR, "creds.json");
 
-const SESSION_ID = 'auth'; // Single document to store all auth data
-
-class MongoAuthState {
-    constructor(db) {
-        this.db = db;
-        this.sessionCollection = db.collection('session');
-    }
-
-    /**
-     * Load credentials from MongoDB
-     */
-    async loadCreds() {
-        const record = await this.sessionCollection.findOne({ _id: SESSION_ID });
-        if (!record || !record.creds) {
-            logger.info('🔐 No active session found in MongoDB. A new session will be created upon connection.');
-            return null;
-        }
-
-        // Basic integrity check
-        const { creds } = record;
-        if (
-            !creds.noiseKey ||
-            !creds.signedIdentityKey ||
-            !creds.signedPreKey ||
-            !creds.registrationId
-        ) {
-            logger.warn('⚠️  Corrupted session detected (missing critical keys). Clearing...');
-            await this.clear();
-            return null;
-        }
-
-        return creds;
-    }
-
-    /**
-     * Save credentials to MongoDB
-     */
-    async saveCreds(creds) {
-        await this.sessionCollection.updateOne(
-            { _id: SESSION_ID },
-            {
-                $set: {
-                    creds,
-                    updated_at: new Date(),
-                },
-                $setOnInsert: {
-                    created_at: new Date(),
-                },
-            },
-            { upsert: true }
-        );
-    }
-
-    /**
-     * Get a signal key by ID
-     */
-    async get(key) {
-        const result = await this.sessionCollection.findOne(
-            { _id: SESSION_ID },
-            { projection: { [`signal_keys.${key}`]: 1 } }
-        );
-
-        const data = result?.signal_keys?.[key];
-        return data ? Buffer.from(JSON.stringify(data)) : undefined;
-    }
-
-    /**
-     * Set multiple signal keys
-     */
-    async set(data) {
-        const updateObj = {};
-        for (const [k, v] of Object.entries(data)) {
-            try {
-                updateObj[`signal_keys.${k}`] = JSON.parse(v.toString('utf8'));
-            } catch (err) {
-                logger.warn(`⚠️ Failed to parse signal key "${k}":`, err.message);
-            }
-        }
-
-        await this.sessionCollection.updateOne(
-            { _id: SESSION_ID },
-            {
-                $set: {
-                    ...updateObj,
-                    updated_at: new Date(),
-                },
-                $setOnInsert: {
-                    created_at: new Date(),
-                },
-            },
-            { upsert: true }
-        );
-    }
-
-    /**
-     * Clear the entire session (use on logout or corruption)
-     */
-    async clear() {
-        const result = await this.sessionCollection.deleteOne({ _id: SESSION_ID });
-        if (result.deletedCount > 0) {
-            logger.info('🗑️  WhatsApp session successfully removed from MongoDB');
-        } else {
-            logger.warn('🗑️  No session found to delete in MongoDB');
-        }
-    }
-}
-
-/**
- * Main function to use MongoDB-only auth state
- * @returns {Object} { state: { creds, keys }, saveCreds: Function, clear: Function }
- */
 async function useMongoAuthState() {
-    let db;
-    try {
-        db = await connectDb();
-    } catch (err) {
-        logger.error('❌ Failed to connect to MongoDB:', err.message);
-        throw new Error('Unable to initialize authentication: Database connection failed.');
+    const db = await connectDb();
+    const coll = db.collection("auth");
+
+    await fs.ensureDir(AUTH_DIR);
+
+    const session = await coll.findOne({ _id: "session" });
+    const archiveBuffer = session?.archive?.buffer || session?.archive;
+
+    if (archiveBuffer && Buffer.isBuffer(archiveBuffer)) {
+        try {
+            // Write tar and extract
+            await fs.writeFile(AUTH_TAR, archiveBuffer);
+            await tar.x({ file: AUTH_TAR, C: ".", strict: true });
+
+            // ✅ Validate critical files
+            if (!(await fs.pathExists(CREDS_PATH))) {
+                console.warn("⚠️ creds.json missing after restore. Clearing session.");
+                await coll.deleteOne({ _id: "session" });
+                await fs.emptyDir(AUTH_DIR);
+            } else {
+                // ✅ Ensure keys/ exists and has content
+                if (!(await fs.pathExists(KEYS_DIR))) {
+                    await fs.ensureDir(KEYS_DIR);
+                    console.warn("⚠️ keys/ directory was missing — created empty. This will cause decryption failures.");
+                } else {
+                    const keyFiles = await fs.readdir(KEYS_DIR);
+                    console.log(`📁 Restored keys/ with ${keyFiles.length} session files`);
+                }
+                console.log("✅ Auth session (creds + keys) restored from MongoDB.");
+            }
+        } catch (err) {
+            console.error("❌ Failed to restore session from MongoDB:", err);
+            await coll.deleteOne({ _id: "session" });
+            await fs.emptyDir(AUTH_DIR);
+        } finally {
+            await fs.remove(AUTH_TAR).catch(() => {});
+        }
+    } else {
+        console.log("ℹ️ No session found in DB. New pairing required.");
     }
 
-    const authState = new MongoAuthState(db);
+    // ✅ Wait for file system to settle
+    await new Promise(resolve => setTimeout(resolve, 500));
 
-    // Load existing credentials
-    let creds = await authState.loadCreds();
+    const { state, saveCreds: originalSaveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
-    if (!creds) {
-        logger.info('🆕 Creating fresh WhatsApp authentication session...');
-        creds = initAuthCreds(); // Baileys built-in function to generate new creds
-        await authState.saveCreds(creds);
+    // ✅ Debounced save to avoid I/O flood
+    let saveTimer;
+    async function saveCreds() {
+        await originalSaveCreds();
+
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(async () => {
+            try {
+                // Only backup auth_info (keys + creds)
+                await tar.c(
+                    { file: AUTH_TAR, cwd: ".", portable: true },
+                    ["auth_info"]
+                );
+                const data = await fs.readFile(AUTH_TAR);
+
+                await coll.updateOne(
+                    { _id: "session" },
+                    { $set: { archive: data, timestamp: new Date() } },
+                    { upsert: true }
+                );
+                console.log("💾 Session saved to MongoDB.");
+            } catch (err) {
+                console.error("❌ Failed to save session to MongoDB:", err);
+            } finally {
+                await fs.remove(AUTH_TAR).catch(() => {});
+            }
+        }, 10000); // Save max every 10s
     }
 
-    return {
-        state: {
-            creds,
-            keys: {
-                get: (key) => authState.get(key),
-                set: (data) => authState.set(data),
-            },
-        },
-        saveCreds: async () => {
-            await authState.saveCreds(creds);
-        },
-        // Exported for external use (e.g., logout)
-        clear: () => authState.clear(),
-    };
+    return { state, saveCreds };
 }
 
 module.exports = { useMongoAuthState };
